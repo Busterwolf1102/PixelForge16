@@ -1,0 +1,24 @@
+PF16 1
+NEXT 16
+SETTINGS 2 9 1 1 1
+OBJECTS 1
+OBJECT 1 Cube
+TRANS 0 0 0 0 0 0 1 1 1
+VERTICES 8
+v 2 -1 -1 -1
+v 3 1 -1 -1
+v 4 1 1 -1
+v 5 -1 1 -1
+v 6 -1 -1 1
+v 7 1 -1 1
+v 8 1 1 1
+v 9 -1 1 1
+FACES 6
+f 10 9 4 2 5 4 3
+f 11 10 4 6 7 8 9
+f 12 11 4 2 6 9 5
+f 13 12 4 3 4 8 7
+f 14 14 4 5 9 8 4
+f 15 6 4 2 3 7 6
+END_OBJECT
+

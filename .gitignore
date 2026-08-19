@@ -1,0 +1,17 @@
+# Build outputs
+/build/
+/dist/
+
+# Runtime captures
+/screenshots/*
+!/screenshots/.gitkeep
+
+# Visual Studio / Windows
+/.vs/
+*.user
+*.suo
+*.obj
+*.pdb
+*.ilk
+*.log
+
