@@ -22,10 +22,11 @@ X / Delete          Delete
 D                   Duplicate
 
 Arrow / WASD        Micro move
-PageUp/PageDown     Depth micro move
+PageUp/PageDown     World Z micro move
+Z                   Z-axis move mode
 Ctrl+Z              Undo
 Ctrl+Shift+Z        Redo
 Ctrl+Y              Redo
 F12                 Screenshot
+LANG menu           English / Korean / Japanese
 ```
-

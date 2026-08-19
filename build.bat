@@ -25,7 +25,7 @@ if %errorlevel%==0 (
         exit /b 1
     )
     if not exist build mkdir build
-    cl /nologo /std:c++20 /EHsc /O2 /W4 /DWIN32_LEAN_AND_MEAN /DNOMINMAX /Fo:build\ src\main.cpp /Febuild\PixelForge16.exe /link user32.lib gdi32.lib comdlg32.lib shell32.lib /SUBSYSTEM:WINDOWS
+    cl /nologo /std:c++20 /utf-8 /EHsc /O2 /W4 /DWIN32_LEAN_AND_MEAN /DNOMINMAX /Fo:build\ src\main.cpp /Febuild\PixelForge16.exe /link user32.lib gdi32.lib comdlg32.lib shell32.lib /SUBSYSTEM:WINDOWS
     if errorlevel 1 exit /b 1
     set "EXE=build\PixelForge16.exe"
 )

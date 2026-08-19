@@ -16,7 +16,7 @@ target_compile_definitions(PixelForge16 PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(PixelForge16 PRIVATE /W4 /permissive-)
+    target_compile_options(PixelForge16 PRIVATE /W4 /permissive- /utf-8)
 endif()
 
 target_link_libraries(PixelForge16 PRIVATE
@@ -25,4 +25,3 @@ target_link_libraries(PixelForge16 PRIVATE
     comdlg32
     shell32
 )
-

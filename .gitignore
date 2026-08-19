@@ -5,6 +5,7 @@
 # Runtime captures
 /screenshots/*
 !/screenshots/.gitkeep
+settings.ini
 
 # Visual Studio / Windows
 /.vs/
@@ -14,4 +15,3 @@
 *.pdb
 *.ilk
 *.log
-

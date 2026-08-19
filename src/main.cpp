@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -36,6 +37,17 @@ static float clampf(float v, float lo, float hi) { return std::max(lo, std::min(
 static int clampi(int v, int lo, int hi) { return std::max(lo, std::min(v, hi)); }
 static float radians(float degrees) { return degrees * kPi / 180.0f; }
 static bool nearlyZero(float v) { return std::fabs(v) < 0.00001f; }
+
+static std::string formatFloat(float v) {
+    if (std::fabs(v) < 0.0005f) v = 0.0f;
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "%.2f", v);
+    std::string out = buf;
+    while (out.size() > 1 && out.back() == '0') out.pop_back();
+    if (!out.empty() && out.back() == '.') out.pop_back();
+    if (out == "-0") out = "0";
+    return out;
+}
 
 struct Vec2 {
     float x = 0.0f;
@@ -336,6 +348,274 @@ struct FrameBuffer {
     }
 };
 
+enum class Locale { English, Korean, Japanese };
+
+static const char *localeId(Locale locale) {
+    switch (locale) {
+    case Locale::English: return "en";
+    case Locale::Korean: return "ko";
+    case Locale::Japanese: return "ja";
+    }
+    return "en";
+}
+
+static Locale localeFromId(const std::string &id) {
+    if (id == "ko" || id == "KR" || id == "korean") return Locale::Korean;
+    if (id == "ja" || id == "JP" || id == "japanese") return Locale::Japanese;
+    return Locale::English;
+}
+
+static Locale systemLocale() {
+    wchar_t name[LOCALE_NAME_MAX_LENGTH] {};
+    if (GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0) {
+        if ((name[0] == L'k' || name[0] == L'K') && (name[1] == L'o' || name[1] == L'O')) return Locale::Korean;
+        if ((name[0] == L'j' || name[0] == L'J') && (name[1] == L'a' || name[1] == L'A')) return Locale::Japanese;
+    }
+    return Locale::English;
+}
+
+struct TranslationEntry {
+    const char *key;
+    const char *en;
+    const char *ko;
+    const char *ja;
+};
+
+static const TranslationEntry kTranslations[] = {
+    {"menu.file", "FILE", "파일", "ファイル"},
+    {"menu.edit", "EDIT", "편집", "編集"},
+    {"menu.add", "ADD", "추가", "追加"},
+    {"menu.view", "VIEW", "보기", "表示"},
+    {"menu.lang", "LANG", "언어", "言語"},
+    {"menu.help", "HELP", "도움말", "ヘルプ"},
+    {"view.top", "TOP", "상단", "上面"},
+    {"view.perspective", "PERSPECTIVE", "원근", "透視"},
+    {"view.front", "FRONT", "전면", "前面"},
+    {"view.side", "SIDE", "측면", "側面"},
+    {"mode.wireframe", "WIREFRAME", "와이어", "ワイヤ"},
+    {"mode.flat", "FLAT", "플랫", "フラット"},
+    {"mode.flat_wire", "FLAT+WIRE", "플랫+선", "面+線"},
+    {"label.snap", "SNAP", "스냅", "スナップ"},
+    {"label.grid", "GRID", "격자", "グリッド"},
+    {"label.color", "COLOR", "색", "色"},
+    {"label.vertex_short", "V", "점", "点"},
+    {"label.face_short", "F", "면", "面"},
+    {"label.palette", "16 COLOR", "16색", "16色"},
+    {"hint.main", "LMB SELECT/DRAG  SPACE VIEW  Z MOVE Z  E EXTRUDE  I INSET  M MODE", "좌클릭 선택/드래그  SPACE 보기  Z 깊이  E 돌출  I 삽입  M 모드", "左クリック 選択/ドラッグ  SPACE 表示  Z 奥行  E 押出  I インセット"},
+    {"hint.split", "SPACE: SPLIT", "SPACE: 분할", "SPACE: 分割"},
+    {"cmd.new", "NEW", "새 파일", "新規"},
+    {"cmd.open", "OPEN", "열기", "開く"},
+    {"cmd.save", "SAVE", "저장", "保存"},
+    {"cmd.save_as", "SAVE AS", "다른 저장", "別名保存"},
+    {"cmd.import_obj", "IMPORT OBJ", "OBJ 가져오기", "OBJ読込"},
+    {"cmd.export_obj", "EXPORT OBJ", "OBJ 내보내기", "OBJ書出"},
+    {"cmd.export_image", "EXPORT IMAGE", "이미지 저장", "画像保存"},
+    {"cmd.exit", "EXIT", "종료", "終了"},
+    {"cmd.undo", "UNDO", "실행 취소", "元に戻す"},
+    {"cmd.redo", "REDO", "다시 실행", "やり直す"},
+    {"cmd.copy", "COPY", "복사", "コピー"},
+    {"cmd.paste", "PASTE", "붙여넣기", "貼付"},
+    {"cmd.duplicate", "DUPLICATE", "복제", "複製"},
+    {"cmd.delete", "DELETE", "삭제", "削除"},
+    {"cmd.vertex", "VERTEX", "정점", "頂点"},
+    {"cmd.plane", "PLANE", "평면", "平面"},
+    {"cmd.cube", "CUBE", "큐브", "立方体"},
+    {"cmd.pyramid", "PYRAMID", "피라미드", "角錐"},
+    {"cmd.prism", "PRISM", "프리즘", "柱体"},
+    {"cmd.cylinder", "CYLINDER", "원기둥", "円柱"},
+    {"cmd.sphere", "SPHERE", "구", "球"},
+    {"cmd.grid", "GRID", "격자", "グリッド"},
+    {"cmd.snap", "SNAP", "스냅", "スナップ"},
+    {"cmd.wireframe", "WIREFRAME", "와이어", "ワイヤ"},
+    {"cmd.flat", "FLAT", "플랫", "フラット"},
+    {"cmd.flat_wire", "FLAT+WIRE", "플랫+선", "面+線"},
+    {"cmd.light", "LIGHT", "조명", "ライト"},
+    {"cmd.frame_all", "FRAME ALL", "전체 보기", "全体表示"},
+    {"cmd.reset_views", "RESET VIEWS", "보기 초기화", "表示リセット"},
+    {"cmd.screenshot", "F12 SCREENSHOT", "F12 스크린샷", "F12 スクショ"},
+    {"cmd.readme", "README", "도움말 파일", "README"},
+    {"cmd.move", "MOVE", "이동", "移動"},
+    {"cmd.move_z", "MOVE Z", "Z 이동", "Z移動"},
+    {"cmd.merge", "MERGE", "병합", "結合"},
+    {"cmd.snap_to_grid", "SNAP TO GRID", "격자 맞춤", "グリッドへ"},
+    {"cmd.extrude", "EXTRUDE", "돌출", "押し出し"},
+    {"cmd.inset", "INSET", "삽입", "インセット"},
+    {"cmd.flip_face", "FLIP FACE", "면 뒤집기", "面反転"},
+    {"cmd.color", "COLOR", "색", "色"},
+    {"cmd.lang_en", "ENGLISH", "영어", "英語"},
+    {"cmd.lang_ko", "KOREAN", "한국어", "韓国語"},
+    {"cmd.lang_ja", "JAPANESE", "일본어", "日本語"},
+    {"status.ready", "READY", "준비", "準備"},
+    {"status.nothing_undo", "NOTHING TO UNDO", "취소할 작업 없음", "戻す操作なし"},
+    {"status.nothing_redo", "NOTHING TO REDO", "다시 실행 없음", "やり直しなし"},
+    {"status.undo", "UNDO", "실행 취소", "元に戻す"},
+    {"status.redo", "REDO", "다시 실행", "やり直す"},
+    {"status.new_scene", "NEW SCENE", "새 장면", "新規シーン"},
+    {"status.add_cube", "ADD CUBE", "큐브 추가", "立方体追加"},
+    {"status.add_plane", "ADD PLANE", "평면 추가", "平面追加"},
+    {"status.add_pyramid", "ADD PYRAMID", "피라미드 추가", "角錐追加"},
+    {"status.add_prism", "ADD PRISM", "프리즘 추가", "柱体追加"},
+    {"status.add_cylinder", "ADD CYLINDER", "원기둥 추가", "円柱追加"},
+    {"status.add_sphere", "ADD SPHERE", "구 추가", "球追加"},
+    {"status.add_vertex", "ADD VERTEX", "정점 추가", "頂点追加"},
+    {"status.move_vertex", "MOVE VERTEX", "정점 이동", "頂点移動"},
+    {"status.move_z", "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL", "Z 이동 | 드래그 또는 숫자 | ENTER 적용 | ESC 취소", "Z移動 | ドラッグまたは数値 | ENTER適用 | ESC取消"},
+    {"status.drag_move", "DRAG TO MOVE", "드래그 이동", "ドラッグ移動"},
+    {"status.move_done", "MOVE DONE", "이동 완료", "移動完了"},
+    {"status.move_cancel", "MOVE CANCEL", "이동 취소", "移動取消"},
+    {"status.box_select", "BOX SELECT", "영역 선택", "範囲選択"},
+    {"status.box_select_done", "BOX SELECT DONE", "영역 선택 완료", "範囲選択完了"},
+    {"status.select_empty", "SELECT EMPTY", "빈 곳 선택", "空を選択"},
+    {"status.select_vertices", "SELECT VERTICES", "정점을 선택", "頂点を選択"},
+    {"status.select_or_hover_face", "SELECT OR HOVER FACE", "면 선택 또는 가리키기", "面を選択/ホバー"},
+    {"status.select_2_vertices", "SELECT 2+ VERTICES", "정점 2개 이상 선택", "頂点2個以上"},
+    {"status.select_3_vertices", "SELECT 3+ VERTICES", "정점 3개 이상 선택", "頂点3個以上"},
+    {"status.face_one_object", "FACE NEEDS ONE OBJECT", "한 오브젝트 정점만 가능", "同一オブジェクトのみ"},
+    {"status.nothing_selected", "NOTHING SELECTED", "선택 없음", "選択なし"},
+    {"status.nothing_duplicate", "NOTHING TO DUPLICATE", "복제할 대상 없음", "複製対象なし"},
+    {"status.clipboard_empty", "CLIPBOARD EMPTY", "클립보드 비어 있음", "クリップ空"},
+    {"status.copy", "COPY", "복사", "コピー"},
+    {"status.paste", "PASTE", "붙여넣기", "貼付"},
+    {"status.delete", "DELETE", "삭제", "削除"},
+    {"status.merge_center", "MERGE CENTER", "중앙 병합", "中央結合"},
+    {"status.snap_to_grid", "SNAP TO GRID", "격자 맞춤", "グリッドへ"},
+    {"status.flip_face", "FLIP FACE", "면 뒤집기", "面反転"},
+    {"status.extrude", "EXTRUDE 1 UNIT", "1 단위 돌출", "1単位押出"},
+    {"status.inset", "INSET", "삽입", "インセット"},
+    {"status.focus", "FOCUS", "초점", "フォーカス"},
+    {"status.frame_all", "FRAME ALL", "전체 보기", "全体表示"},
+    {"status.reset_views", "RESET VIEWS", "보기 초기화", "表示リセット"},
+    {"status.zoom", "ZOOM", "확대/축소", "ズーム"},
+    {"status.pan", "PAN", "이동 보기", "パン"},
+    {"status.orbit", "ORBIT", "회전 보기", "オービット"},
+    {"status.saved", "SAVED", "저장됨", "保存済み"},
+    {"status.loaded", "LOADED", "불러옴", "読込済み"},
+    {"status.save_cancel", "SAVE CANCEL", "저장 취소", "保存取消"},
+    {"status.open_cancel", "OPEN CANCEL", "열기 취소", "読込取消"},
+    {"status.export_cancel", "EXPORT CANCEL", "내보내기 취소", "書出取消"},
+    {"status.import_cancel", "IMPORT CANCEL", "가져오기 취소", "読込取消"},
+    {"status.save_failed", "SAVE FAILED", "저장 실패", "保存失敗"},
+    {"status.open_failed", "OPEN FAILED", "열기 실패", "読込失敗"},
+    {"status.obj_exported", "OBJ EXPORTED", "OBJ 내보냄", "OBJ書出済み"},
+    {"status.obj_export_failed", "OBJ EXPORT FAILED", "OBJ 내보내기 실패", "OBJ書出失敗"},
+    {"status.obj_imported", "OBJ IMPORTED", "OBJ 가져옴", "OBJ読込済み"},
+    {"status.obj_import_failed", "OBJ IMPORT FAILED", "OBJ 가져오기 실패", "OBJ読込失敗"},
+    {"status.grid_on", "GRID ON", "격자 켜짐", "グリッドON"},
+    {"status.grid_off", "GRID OFF", "격자 꺼짐", "グリッドOFF"},
+    {"status.snap_on", "SNAP ON", "스냅 켜짐", "スナップON"},
+    {"status.snap_off", "SNAP OFF", "스냅 꺼짐", "スナップOFF"},
+    {"status.language", "LANGUAGE", "언어", "言語"}
+};
+
+static std::string tr(Locale locale, const char *key) {
+    for (const auto &entry : kTranslations) {
+        if (std::string(entry.key) == key) {
+            switch (locale) {
+            case Locale::Korean: return entry.ko;
+            case Locale::Japanese: return entry.ja;
+            case Locale::English: return entry.en;
+            }
+        }
+    }
+    return key;
+}
+
+struct WideGlyphBitmap {
+    int w = 12;
+    int h = 12;
+    std::vector<uint8_t> pixels;
+};
+
+static WideGlyphBitmap rasterizeWideGlyph(wchar_t wc) {
+    constexpr int gw = 12;
+    constexpr int gh = 12;
+    WideGlyphBitmap glyph;
+    glyph.w = gw;
+    glyph.h = gh;
+    glyph.pixels.assign(size_t(gw) * gh, 0);
+
+    BITMAPINFO bmi {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = gw;
+    bmi.bmiHeader.biHeight = -gh;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void *bits = nullptr;
+    HDC dc = CreateCompatibleDC(nullptr);
+    HBITMAP bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dc || !bitmap || !bits) {
+        if (bitmap) DeleteObject(bitmap);
+        if (dc) DeleteDC(dc);
+        return glyph;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(dc, bitmap);
+    RECT rc {0, 0, gw, gh};
+    HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0));
+    FillRect(dc, &rc, brush);
+    DeleteObject(brush);
+
+    HFONT font = CreateFontW(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY,
+                             FIXED_PITCH | FF_MODERN, L"Malgun Gothic");
+    HGDIOBJ oldFont = SelectObject(dc, font);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
+    TextOutW(dc, 0, -1, &wc, 1);
+
+    const uint32_t *src = static_cast<const uint32_t *>(bits);
+    for (int y = 0; y < gh; ++y) {
+        for (int x = 0; x < gw; ++x) {
+            uint32_t px = src[size_t(y) * gw + x];
+            uint8_t r = uint8_t(px & 0xff);
+            uint8_t g = uint8_t((px >> 8) & 0xff);
+            uint8_t b = uint8_t((px >> 16) & 0xff);
+            glyph.pixels[size_t(y) * gw + x] = (int(r) + int(g) + int(b)) > 96 ? 1 : 0;
+        }
+    }
+
+    SelectObject(dc, oldFont);
+    SelectObject(dc, oldBitmap);
+    DeleteObject(font);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+    return glyph;
+}
+
+static const WideGlyphBitmap &wideGlyphFor(wchar_t wc) {
+    static std::map<wchar_t, WideGlyphBitmap> cache;
+    auto it = cache.find(wc);
+    if (it != cache.end()) return it->second;
+    auto inserted = cache.emplace(wc, rasterizeWideGlyph(wc));
+    return inserted.first->second;
+}
+
+static uint32_t readUtf8Codepoint(const std::string &text, size_t &i) {
+    unsigned char c = static_cast<unsigned char>(text[i++]);
+    if (c < 0x80) return c;
+    if ((c >> 5) == 0x06 && i < text.size()) {
+        uint32_t cp = uint32_t(c & 0x1f) << 6;
+        cp |= uint32_t(static_cast<unsigned char>(text[i++]) & 0x3f);
+        return cp;
+    }
+    if ((c >> 4) == 0x0e && i + 1 < text.size()) {
+        uint32_t cp = uint32_t(c & 0x0f) << 12;
+        cp |= uint32_t(static_cast<unsigned char>(text[i++]) & 0x3f) << 6;
+        cp |= uint32_t(static_cast<unsigned char>(text[i++]) & 0x3f);
+        return cp;
+    }
+    if ((c >> 3) == 0x1e && i + 2 < text.size()) {
+        uint32_t cp = uint32_t(c & 0x07) << 18;
+        cp |= uint32_t(static_cast<unsigned char>(text[i++]) & 0x3f) << 12;
+        cp |= uint32_t(static_cast<unsigned char>(text[i++]) & 0x3f) << 6;
+        cp |= uint32_t(static_cast<unsigned char>(text[i++]) & 0x3f);
+        return cp;
+    }
+    return '?';
+}
+
 static std::array<uint8_t, 7> glyphFor(char input) {
     char c = char(std::toupper(static_cast<unsigned char>(input)));
     switch (c) {
@@ -411,34 +691,77 @@ static void drawGlyph(FrameBuffer &fb, int x, int y, char c, uint8_t color, int 
     }
 }
 
+static void drawWideGlyph(FrameBuffer &fb, int x, int y, wchar_t wc, uint8_t color, int scale = 1) {
+    const WideGlyphBitmap &g = wideGlyphFor(wc);
+    for (int row = 0; row < g.h; ++row) {
+        for (int col = 0; col < g.w; ++col) {
+            if (!g.pixels[size_t(row) * g.w + col]) continue;
+            for (int sy = 0; sy < scale; ++sy) {
+                for (int sx = 0; sx < scale; ++sx) {
+                    fb.pixel(x + col * scale + sx, y + row * scale + sy, color);
+                }
+            }
+        }
+    }
+}
+
 static void drawText(FrameBuffer &fb, int x, int y, const std::string &text, uint8_t color, int scale = 1) {
     int cx = x;
-    for (char c : text) {
-        if (c == '\n') {
+    for (size_t i = 0; i < text.size();) {
+        uint32_t cp = readUtf8Codepoint(text, i);
+        if (cp == '\n') {
             y += 8 * scale;
             cx = x;
             continue;
         }
-        drawGlyph(fb, cx, y, c, color, scale);
-        cx += 6 * scale;
+        if (cp < 0x80) {
+            drawGlyph(fb, cx, y, char(cp), color, scale);
+            cx += 6 * scale;
+        } else if (cp <= 0xffff) {
+            drawWideGlyph(fb, cx, y - 2 * scale, wchar_t(cp), color, scale);
+            cx += 12 * scale;
+        } else {
+            drawGlyph(fb, cx, y, '?', color, scale);
+            cx += 6 * scale;
+        }
     }
 }
 
 static int textWidth(const std::string &text, int scale = 1) {
-    return int(text.size()) * 6 * scale;
+    int width = 0;
+    int line = 0;
+    for (size_t i = 0; i < text.size();) {
+        uint32_t cp = readUtf8Codepoint(text, i);
+        if (cp == '\n') {
+            width = std::max(width, line);
+            line = 0;
+            continue;
+        }
+        line += (cp < 0x80 ? 6 : 12) * scale;
+    }
+    return std::max(width, line);
 }
 
 enum class ViewKind { Top, Perspective, Front, Side };
 enum class RenderMode { Wireframe, Flat, FlatWire };
 enum class ElementType { None, Vertex, Edge, Face, Object };
-enum class DragMode { None, VertexDrag, ObjectDrag, BoxSelect, Orbit, Pan };
+enum class DragMode { None, VertexDrag, VertexZMove, ObjectDrag, BoxSelect, Orbit, Pan };
 
-static const char *viewName(ViewKind k) {
+static const char *viewKey(ViewKind k) {
     switch (k) {
-    case ViewKind::Top: return "TOP";
-    case ViewKind::Perspective: return "PERSPECTIVE";
-    case ViewKind::Front: return "FRONT";
-    case ViewKind::Side: return "SIDE";
+    case ViewKind::Top: return "view.top";
+    case ViewKind::Perspective: return "view.perspective";
+    case ViewKind::Front: return "view.front";
+    case ViewKind::Side: return "view.side";
+    }
+    return "";
+}
+
+static const char *renderModeKey(RenderMode mode) {
+    switch (mode) {
+    case RenderMode::Wireframe: return "mode.wireframe";
+    case RenderMode::Flat: return "mode.flat";
+    case RenderMode::FlatWire: return "mode.flat_wire";
     }
     return "";
 }
@@ -508,7 +831,7 @@ struct HoverInfo {
 struct Snapshot {
     Scene scene;
     std::vector<ElementRef> selection;
-    std::string currentFile;
+    std::filesystem::path currentFile;
 };
 
 struct ViewState {
@@ -551,6 +874,7 @@ struct DragState {
     int lastX = 0;
     int lastY = 0;
     bool changed = false;
+    std::string typedValue;
     Snapshot before;
     std::vector<VertexDragItem> vertices;
     std::vector<ObjectDragItem> objects;
@@ -642,8 +966,8 @@ static Vec3 faceNormalWorld(const Object3D &obj, const Face &face) {
 }
 
 static std::filesystem::path executableDir() {
-    char path[MAX_PATH] {};
-    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    wchar_t path[MAX_PATH] {};
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
     return std::filesystem::path(path).parent_path();
 }
 
@@ -669,7 +993,8 @@ public:
     ClipboardScene clipboard;
     std::vector<Snapshot> undoStack;
     std::vector<Snapshot> redoStack;
-    std::string currentFile;
+    std::filesystem::path currentFile;
+    Locale language = Locale::English;
     std::string status = "READY";
     int clientW = kDefaultWindowW;
     int clientH = kDefaultWindowH;
@@ -680,6 +1005,7 @@ public:
     int mouseY = 0;
 
     App() {
+        loadSettings();
         views[0].kind = ViewKind::Top;
         views[1].kind = ViewKind::Perspective;
         views[2].kind = ViewKind::Front;
@@ -689,6 +1015,191 @@ public:
         views[3].center = {0, 0, 0};
         views[1].center = {0, 0, 0};
         newScene(false);
+    }
+
+    std::filesystem::path settingsPath() const {
+        return executableDir() / "settings.ini";
+    }
+
+    void loadSettings() {
+        language = systemLocale();
+        std::ifstream in(settingsPath());
+        if (!in) return;
+        std::string line;
+        while (std::getline(in, line)) {
+            const std::string prefix = "language=";
+            if (line.rfind(prefix, 0) == 0) {
+                language = localeFromId(line.substr(prefix.size()));
+            }
+        }
+    }
+
+    void saveSettings() const {
+        std::ofstream out(settingsPath(), std::ios::binary);
+        if (!out) return;
+        out << "language=" << localeId(language) << "\n";
+    }
+
+    std::string text(const char *key) const {
+        return tr(language, key);
+    }
+
+    const char *menuKey(const std::string &id) const {
+        if (id == "FILE") return "menu.file";
+        if (id == "EDIT") return "menu.edit";
+        if (id == "ADD") return "menu.add";
+        if (id == "VIEW") return "menu.view";
+        if (id == "LANG") return "menu.lang";
+        if (id == "HELP") return "menu.help";
+        return "";
+    }
+
+    const char *commandKey(const std::string &id) const {
+        if (id == "NEW") return "cmd.new";
+        if (id == "OPEN") return "cmd.open";
+        if (id == "SAVE") return "cmd.save";
+        if (id == "SAVE AS") return "cmd.save_as";
+        if (id == "IMPORT OBJ") return "cmd.import_obj";
+        if (id == "EXPORT OBJ") return "cmd.export_obj";
+        if (id == "EXPORT IMAGE") return "cmd.export_image";
+        if (id == "EXIT") return "cmd.exit";
+        if (id == "UNDO") return "cmd.undo";
+        if (id == "REDO") return "cmd.redo";
+        if (id == "COPY") return "cmd.copy";
+        if (id == "PASTE") return "cmd.paste";
+        if (id == "DUPLICATE") return "cmd.duplicate";
+        if (id == "DELETE") return "cmd.delete";
+        if (id == "VERTEX") return "cmd.vertex";
+        if (id == "PLANE") return "cmd.plane";
+        if (id == "CUBE") return "cmd.cube";
+        if (id == "PYRAMID") return "cmd.pyramid";
+        if (id == "PRISM") return "cmd.prism";
+        if (id == "CYLINDER") return "cmd.cylinder";
+        if (id == "SPHERE") return "cmd.sphere";
+        if (id == "GRID") return "cmd.grid";
+        if (id == "TOGGLE SNAP") return "cmd.snap";
+        if (id == "WIREFRAME") return "cmd.wireframe";
+        if (id == "FLAT") return "cmd.flat";
+        if (id == "FLAT+WIRE") return "cmd.flat_wire";
+        if (id == "LIGHT") return "cmd.light";
+        if (id == "FRAME ALL") return "cmd.frame_all";
+        if (id == "RESET VIEWS") return "cmd.reset_views";
+        if (id == "F12 SCREENSHOT") return "cmd.screenshot";
+        if (id == "README") return "cmd.readme";
+        if (id == "MOVE") return "cmd.move";
+        if (id == "MOVE Z") return "cmd.move_z";
+        if (id == "MERGE") return "cmd.merge";
+        if (id == "SNAP TO GRID") return "cmd.snap_to_grid";
+        if (id == "EXTRUDE") return "cmd.extrude";
+        if (id == "INSET") return "cmd.inset";
+        if (id == "FLIP FACE") return "cmd.flip_face";
+        if (id == "COLOR") return "cmd.color";
+        if (id == "LANG EN") return "cmd.lang_en";
+        if (id == "LANG KO") return "cmd.lang_ko";
+        if (id == "LANG JA") return "cmd.lang_ja";
+        return "";
+    }
+
+    std::string menuLabel(const std::string &id) const {
+        const char *key = menuKey(id);
+        return key[0] ? text(key) : id;
+    }
+
+    std::string itemLabel(const std::string &id) const {
+        const char *key = commandKey(id);
+        std::string label = key[0] ? text(key) : id;
+        if ((id == "LANG EN" && language == Locale::English) ||
+            (id == "LANG KO" && language == Locale::Korean) ||
+            (id == "LANG JA" && language == Locale::Japanese)) {
+            label = "[X] " + label;
+        }
+        return label;
+    }
+
+    std::string localizedStatus() const {
+        static const std::pair<const char *, const char *> statusKeys[] = {
+            { "READY", "status.ready" },
+            { "NOTHING TO UNDO", "status.nothing_undo" },
+            { "NOTHING TO REDO", "status.nothing_redo" },
+            { "UNDO", "status.undo" },
+            { "REDO", "status.redo" },
+            { "NEW SCENE", "status.new_scene" },
+            { "ADD CUBE", "status.add_cube" },
+            { "ADD PLANE", "status.add_plane" },
+            { "ADD PYRAMID", "status.add_pyramid" },
+            { "ADD PRISM", "status.add_prism" },
+            { "ADD CYLINDER", "status.add_cylinder" },
+            { "ADD SPHERE", "status.add_sphere" },
+            { "ADD VERTEX", "status.add_vertex" },
+            { "MOVE VERTEX", "status.move_vertex" },
+            { "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL", "status.move_z" },
+            { "DRAG TO MOVE", "status.drag_move" },
+            { "MOVE DONE", "status.move_done" },
+            { "MOVE CANCEL", "status.move_cancel" },
+            { "BOX SELECT", "status.box_select" },
+            { "BOX SELECT DONE", "status.box_select_done" },
+            { "SELECT EMPTY", "status.select_empty" },
+            { "SELECT VERTICES", "status.select_vertices" },
+            { "SELECT OR HOVER FACE", "status.select_or_hover_face" },
+            { "SELECT 2+ VERTICES", "status.select_2_vertices" },
+            { "SELECT 3+ VERTICES", "status.select_3_vertices" },
+            { "FACE NEEDS ONE OBJECT", "status.face_one_object" },
+            { "NOTHING SELECTED", "status.nothing_selected" },
+            { "NOTHING TO DUPLICATE", "status.nothing_duplicate" },
+            { "CLIPBOARD EMPTY", "status.clipboard_empty" },
+            { "COPY", "status.copy" },
+            { "PASTE", "status.paste" },
+            { "DELETE", "status.delete" },
+            { "MERGE CENTER", "status.merge_center" },
+            { "SNAP TO GRID", "status.snap_to_grid" },
+            { "FLIP FACE", "status.flip_face" },
+            { "EXTRUDE 1 UNIT", "status.extrude" },
+            { "INSET", "status.inset" },
+            { "FOCUS", "status.focus" },
+            { "FRAME ALL", "status.frame_all" },
+            { "RESET VIEWS", "status.reset_views" },
+            { "ZOOM", "status.zoom" },
+            { "PAN", "status.pan" },
+            { "ORBIT", "status.orbit" },
+            { "SAVED", "status.saved" },
+            { "LOADED", "status.loaded" },
+            { "SAVE CANCEL", "status.save_cancel" },
+            { "OPEN CANCEL", "status.open_cancel" },
+            { "EXPORT CANCEL", "status.export_cancel" },
+            { "IMPORT CANCEL", "status.import_cancel" },
+            { "SAVE FAILED", "status.save_failed" },
+            { "OPEN FAILED", "status.open_failed" },
+            { "OBJ EXPORTED", "status.obj_exported" },
+            { "OBJ EXPORT FAILED", "status.obj_export_failed" },
+            { "OBJ IMPORTED", "status.obj_imported" },
+            { "OBJ IMPORT FAILED", "status.obj_import_failed" },
+            { "GRID ON", "status.grid_on" },
+            { "GRID OFF", "status.grid_off" },
+            { "SNAP ON", "status.snap_on" },
+            { "SNAP OFF", "status.snap_off" },
+            { "WIREFRAME", "mode.wireframe" },
+            { "FLAT", "mode.flat" },
+            { "FLAT+WIRE", "mode.flat_wire" },
+            { "4 VIEWPORTS", "menu.view" },
+            { "MAXIMIZE VIEW", "menu.view" },
+            { "ADD MENU", "menu.add" },
+            { "CLICK PALETTE COLOR", "cmd.color" },
+            { "DRAG VERTEX DIRECTLY", "cmd.move" },
+            { "ESC", "ESC" },
+            { "CANCEL", "status.move_cancel" }
+        };
+        for (const auto &[raw, key] : statusKeys) {
+            if (status == raw) return text(key);
+        }
+        if (status.rfind("LANGUAGE ", 0) == 0) return text("status.language") + " " + status.substr(9);
+        if (status.rfind("COLOR ", 0) == 0) return text("label.color") + status.substr(5);
+        return status;
+    }
+
+    void setLanguage(Locale locale) {
+        language = locale;
+        saveSettings();
+        status = std::string("LANGUAGE ") + localeId(language);
     }
 
     uint32_t allocId() { return scene.nextId++; }
@@ -1248,26 +1759,38 @@ public:
         fb.rect(vd.rect, active ? kTheme.borderActive : kTheme.border);
         drawGrid(vd);
         renderMesh(vd);
-        IRect header {vd.rect.x + 1, vd.rect.y + 1, std::min(vd.rect.w - 2, textWidth(viewName(vd.state->kind)) + 10), 11};
+        std::string title = text(viewKey(vd.state->kind));
+        IRect header {vd.rect.x + 1, vd.rect.y + 1, std::min(vd.rect.w - 2, textWidth(title) + 10), 13};
         fb.fillRect(header, active ? kTheme.panelActive : kTheme.panel);
-        drawText(fb, vd.rect.x + 4, vd.rect.y + 3, viewName(vd.state->kind), active ? kTheme.textBright : kTheme.text);
+        drawText(fb, vd.rect.x + 4, vd.rect.y + 3, title, active ? kTheme.textBright : kTheme.text);
         if (maximizedView.has_value()) {
-            drawText(fb, vd.rect.x + vd.rect.w - 95, vd.rect.y + 3, "SPACE: SPLIT", kTheme.hover);
+            std::string split = text("hint.split");
+            drawText(fb, vd.rect.x + vd.rect.w - textWidth(split) - 5, vd.rect.y + 3, split, kTheme.hover);
         }
+    }
+
+    std::vector<std::pair<std::string, IRect>> menuBarRects() const {
+        std::array<std::string, 6> ids {"FILE", "EDIT", "ADD", "VIEW", "LANG", "HELP"};
+        std::vector<std::pair<std::string, IRect>> out;
+        int x = 130;
+        for (const auto &id : ids) {
+            std::string label = menuLabel(id);
+            int w = textWidth(label) + 6;
+            out.push_back({id, {x - 3, 1, w, 12}});
+            x += w + 8;
+        }
+        return out;
     }
 
     void drawMenuBar() {
         fb.fillRect({0, 0, kLogicalW, 14}, kTheme.panel);
         fb.line(0, 13, kLogicalW - 1, 13, kTheme.borderActive);
         drawText(fb, 4, 3, "PIXELFORGE 16", kTheme.textBright);
-        std::array<std::string, 5> names {"FILE", "EDIT", "ADD", "VIEW", "HELP"};
-        int x = 130;
-        for (const auto &n : names) {
-            IRect r {x - 3, 1, textWidth(n) + 6, 12};
-            bool open = menu.open && menu.name == n;
+        for (const auto &[id, r] : menuBarRects()) {
+            std::string label = menuLabel(id);
+            bool open = menu.open && menu.name == id;
             if (open) fb.fillRect(r, kTheme.panelActive);
-            drawText(fb, x, 3, n, open ? kTheme.textBright : kTheme.textBright);
-            x += textWidth(n) + 14;
+            drawText(fb, r.x + 3, 3, label, open ? kTheme.textBright : kTheme.textBright);
         }
     }
 
@@ -1316,16 +1839,39 @@ public:
         if (item == "EXTRUDE") return "E";
         if (item == "INSET") return "I";
         if (item == "FLIP FACE") return "F";
+        if (item == "MOVE Z") return "Z";
         if (item == "DUPLICATE") return "D";
         if (item == "DELETE") return "X";
         if (item == "GRID") return "ON/OFF";
-        if (item == "SNAP") return "ON/OFF";
+        if (item == "TOGGLE SNAP") return "ON/OFF";
+        if (item == "SNAP TO GRID") return "CTRL";
         if (item == "WIREFRAME") return "M";
         if (item == "FLAT") return "M";
         if (item == "FLAT+WIRE") return "M";
         if (item == "FRAME ALL") return "HOME";
         if (item == "RESET VIEWS") return "CTRL+HOME";
         return {};
+    }
+
+    int menuItemHeight() const {
+        return 12;
+    }
+
+    int popupWidthFor(const std::vector<std::string> &items, int minWidth) const {
+        int width = minWidth;
+        for (const auto &item : items) {
+            int row = textWidth(itemLabel(item)) + 10;
+            std::string shortcut = shortcutFor(item);
+            if (!shortcut.empty()) row += textWidth(shortcut) + 12;
+            width = std::max(width, row);
+        }
+        return clampi(width, minWidth, kLogicalW - 4);
+    }
+
+    void placePopup(int x, int y, int minWidth) {
+        int w = popupWidthFor(menu.items, minWidth);
+        int h = int(menu.items.size()) * menuItemHeight() + 2;
+        menu.rect = {clampi(x, 0, kLogicalW - w - 1), clampi(y, 14, kLogicalH - h - 1), w, h};
     }
 
     void drawStatusBar() {
@@ -1340,16 +1886,16 @@ public:
             faces += int(obj.mesh.faces.size());
         }
         std::ostringstream ss;
-        ss << renderModeName(scene.renderMode)
-           << " | SNAP:" << (scene.snap ? scene.gridSize : 0)
-           << " | GRID:" << (scene.grid ? scene.gridSize : 0)
-           << " | V:" << verts << " F:" << faces
-           << " | COLOR:" << int(scene.currentColor)
-           << " | " << status;
+        ss << text(renderModeKey(scene.renderMode))
+           << " | " << text("label.snap") << ":" << (scene.snap ? scene.gridSize : 0)
+           << " | " << text("label.grid") << ":" << (scene.grid ? scene.gridSize : 0)
+           << " | " << text("label.vertex_short") << ":" << verts << " " << text("label.face_short") << ":" << faces
+           << " | " << text("label.color") << ":" << int(scene.currentColor)
+           << " | " << localizedStatus();
         drawText(fb, 4, r.y + 5, ss.str(), statusColor());
 
-        drawText(fb, 4, r.y + 22, "LMB SELECT/DRAG  SPACE VIEW  E EXTRUDE  I INSET  F FACE  M MODE", kTheme.hover);
-        drawText(fb, 238, kLogicalH - 18, "16 COLOR", kTheme.textBright);
+        drawText(fb, 4, r.y + 22, text("hint.main"), kTheme.hover);
+        drawText(fb, 238, kLogicalH - 18, text("label.palette"), kTheme.textBright);
         for (int i = 0; i < 16; ++i) {
             IRect pr = paletteRect(i);
             fb.fillRect(pr, uint8_t(i));
@@ -1366,11 +1912,12 @@ public:
         fb.fillRect(menu.rect, kTheme.panel);
         fb.rect(menu.rect, kTheme.borderActive);
         for (size_t i = 0; i < menu.items.size(); ++i) {
-            IRect item {menu.rect.x + 1, menu.rect.y + 1 + int(i) * 10, menu.rect.w - 2, 10};
+            IRect item {menu.rect.x + 1, menu.rect.y + 1 + int(i) * menuItemHeight(), menu.rect.w - 2, menuItemHeight()};
             bool hot = item.contains(mouseX, mouseY);
             if (hot) fb.fillRect(item, kTheme.panelActive);
             uint8_t textColor = menu.items[i] == "DELETE" ? kTheme.warning : (hot ? kTheme.textBright : kTheme.text);
-            drawText(fb, item.x + 3, item.y + 2, menu.items[i], textColor);
+            std::string label = itemLabel(menu.items[i]);
+            drawText(fb, item.x + 3, item.y + 2, label, textColor);
             std::string shortcut = shortcutFor(menu.items[i]);
             if (!shortcut.empty()) {
                 drawText(fb, item.x + item.w - textWidth(shortcut) - 3, item.y + 2, shortcut, kTheme.hover);
@@ -1564,7 +2111,6 @@ public:
         int dx = x - drag.startX;
         int dy = y - drag.startY;
         Vec3 deltaWorld = viewDelta(drag.view, dx, dy);
-        Vec3 changedMask {deltaWorld.x != 0 ? 1.0f : 0.0f, deltaWorld.y != 0 ? 1.0f : 0.0f, deltaWorld.z != 0 ? 1.0f : 0.0f};
         bool snapOn = ctrlDown ? !scene.snap : scene.snap;
         for (const auto &item : drag.vertices) {
             Object3D *obj = findObject(scene, item.objectId);
@@ -1572,13 +2118,116 @@ public:
             Vertex *v = findVertex(*obj, item.vertexId);
             if (!v) continue;
             Vec3 localDelta = inverseTransformVector(deltaWorld, obj->transform);
+            Vec3 changedMask {std::fabs(localDelta.x) > 0.00001f ? 1.0f : 0.0f,
+                              std::fabs(localDelta.y) > 0.00001f ? 1.0f : 0.0f,
+                              std::fabs(localDelta.z) > 0.00001f ? 1.0f : 0.0f};
             Vec3 p = item.original + localDelta;
             v->position = snapPosition(p, item.original, changedMask, snapOn);
         }
         drag.lastX = x;
         drag.lastY = y;
         drag.changed = true;
-        status = "DRAG TO MOVE";
+        if (std::fabs(deltaWorld.z) > 0.00001f) {
+            status = "Z: " + formatFloat(deltaWorld.z);
+            if (!drag.vertices.empty()) status += " (" + formatFloat(deltaWorld.z) + ")";
+        } else {
+            status = "DRAG TO MOVE";
+        }
+    }
+
+    void beginVertexZMove(int x, int y) {
+        std::vector<ElementRef> verts = selectedVertices();
+        if (verts.empty() && hover.type == ElementType::Vertex) {
+            clearSelection();
+            addSelection({ElementType::Vertex, hover.objectId, hover.id});
+            verts = selectedVertices();
+        }
+        if (verts.empty()) {
+            status = "SELECT VERTICES";
+            return;
+        }
+        drag = DragState {};
+        drag.mode = DragMode::VertexZMove;
+        drag.view = activeView;
+        drag.startX = drag.lastX = x;
+        drag.startY = drag.lastY = y;
+        drag.before = makeSnapshot();
+        for (const ElementRef &r : verts) {
+            Object3D *obj = findObject(scene, r.objectId);
+            if (!obj) continue;
+            Vertex *v = findVertex(*obj, r.id);
+            if (v) drag.vertices.push_back({r.objectId, r.id, v->position});
+        }
+        if (drag.vertices.empty()) {
+            drag = DragState {};
+            status = "SELECT VERTICES";
+            return;
+        }
+        if (hwnd) SetCapture(hwnd);
+        status = "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL";
+    }
+
+    float zAmountFromMouse(int x, int y) const {
+        const ViewState *view = stateFor(drag.view);
+        float inv = 1.0f / std::max(1.0f, view->zoom);
+        if (drag.view == ViewKind::Side) return float(x - drag.startX) * inv;
+        return float(drag.startY - y) * inv;
+    }
+
+    void applyZMove(float amount, bool snapOn) {
+        Vec3 deltaWorld {0.0f, 0.0f, amount};
+        for (const auto &item : drag.vertices) {
+            Object3D *obj = findObject(scene, item.objectId);
+            if (!obj) continue;
+            Vertex *v = findVertex(*obj, item.vertexId);
+            if (!v) continue;
+            Vec3 localDelta = inverseTransformVector(deltaWorld, obj->transform);
+            Vec3 changedMask {std::fabs(localDelta.x) > 0.00001f ? 1.0f : 0.0f,
+                              std::fabs(localDelta.y) > 0.00001f ? 1.0f : 0.0f,
+                              std::fabs(localDelta.z) > 0.00001f ? 1.0f : 0.0f};
+            Vec3 p = item.original + localDelta;
+            v->position = snapPosition(p, item.original, changedMask, snapOn);
+        }
+        drag.changed = drag.changed || std::fabs(amount) > 0.00001f;
+    }
+
+    bool parseZValue(float &amount) const {
+        if (drag.typedValue.empty() || drag.typedValue == "-" || drag.typedValue == "+" || drag.typedValue == ".") return false;
+        char *end = nullptr;
+        amount = std::strtof(drag.typedValue.c_str(), &end);
+        return end && *end == '\0';
+    }
+
+    void updateVertexZMove(int x, int y, bool ctrlDown) {
+        float amount = 0.0f;
+        if (!parseZValue(amount)) {
+            amount = zAmountFromMouse(x, y);
+        }
+        bool snapOn = ctrlDown ? !scene.snap : scene.snap;
+        applyZMove(amount, snapOn);
+        drag.lastX = x;
+        drag.lastY = y;
+        status = "Z: " + formatFloat(amount) + " (" + formatFloat(amount) + ")";
+        if (!drag.typedValue.empty()) status += " | " + drag.typedValue;
+    }
+
+    void commitVertexZMove() {
+        if (drag.mode != DragMode::VertexZMove) return;
+        float amount = 0.0f;
+        bool exact = parseZValue(amount);
+        if (exact) {
+            bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            bool snapOn = ctrl ? !scene.snap : scene.snap;
+            applyZMove(amount, snapOn);
+        }
+        if (drag.changed) {
+            pushUndo(drag.before);
+            status = "MOVE DONE";
+        } else {
+            status = "MOVE CANCEL";
+        }
+        if (hwnd) ReleaseCapture();
+        drag = DragState {};
     }
 
     void beginBoxSelect(int x, int y, ViewKind view) {
@@ -1648,6 +2297,9 @@ public:
         if (drag.mode == DragMode::VertexDrag && drag.changed) {
             pushUndo(drag.before);
             status = "MOVE DONE";
+        } else if (drag.mode == DragMode::VertexZMove) {
+            commitVertexZMove();
+            return;
         } else if (drag.mode == DragMode::BoxSelect) {
             // Selection-only changes are intentionally not undo history entries.
         }
@@ -1655,9 +2307,10 @@ public:
     }
 
     void cancelDrag() {
-        if (drag.mode == DragMode::VertexDrag) {
+        if (drag.mode == DragMode::VertexDrag || drag.mode == DragMode::VertexZMove) {
             restoreSnapshot(drag.before);
             status = "MOVE CANCEL";
+            if (hwnd) ReleaseCapture();
         } else {
             status = "CANCEL";
         }
@@ -2201,9 +2854,9 @@ public:
         status = "PASTE";
     }
 
-    std::string fileDialog(bool save, const char *filter, const char *defaultExt) {
-        char filename[MAX_PATH] {};
-        OPENFILENAMEA ofn {};
+    std::filesystem::path fileDialog(bool save, const wchar_t *filter, const wchar_t *defaultExt) {
+        wchar_t filename[MAX_PATH] {};
+        OPENFILENAMEW ofn {};
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = hwnd;
         ofn.lpstrFile = filename;
@@ -2211,12 +2864,12 @@ public:
         ofn.lpstrFilter = filter;
         ofn.lpstrDefExt = defaultExt;
         ofn.Flags = OFN_PATHMUSTEXIST | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-        BOOL ok = save ? GetSaveFileNameA(&ofn) : GetOpenFileNameA(&ofn);
+        BOOL ok = save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
         if (!ok) return {};
-        return filename;
+        return std::filesystem::path(filename);
     }
 
-    bool savePf16(const std::string &path) {
+    bool savePf16(const std::filesystem::path &path) {
         std::ofstream out(path, std::ios::binary);
         if (!out) return false;
         out << "PF16 1\n";
@@ -2244,7 +2897,7 @@ public:
         return true;
     }
 
-    bool loadPf16(const std::string &path) {
+    bool loadPf16(const std::filesystem::path &path) {
         std::ifstream in(path, std::ios::binary);
         if (!in) return false;
         Scene loaded;
@@ -2311,10 +2964,10 @@ public:
     }
 
     void saveCommand(bool saveAs) {
-        std::string path = currentFile;
+        std::filesystem::path path = currentFile;
         if (path.empty() || saveAs) {
-            static const char filter[] = "PixelForge 16 (*.pf16)\0*.pf16\0All Files (*.*)\0*.*\0";
-            path = fileDialog(true, filter, "pf16");
+            static const wchar_t filter[] = L"PixelForge 16 (*.pf16)\0*.pf16\0All Files (*.*)\0*.*\0";
+            path = fileDialog(true, filter, L"pf16");
         }
         if (path.empty()) {
             status = "SAVE CANCEL";
@@ -2329,8 +2982,8 @@ public:
     }
 
     void openCommand() {
-        static const char filter[] = "PixelForge 16 (*.pf16)\0*.pf16\0All Files (*.*)\0*.*\0";
-        std::string path = fileDialog(false, filter, "pf16");
+        static const wchar_t filter[] = L"PixelForge 16 (*.pf16)\0*.pf16\0All Files (*.*)\0*.*\0";
+        std::filesystem::path path = fileDialog(false, filter, L"pf16");
         if (path.empty()) {
             status = "OPEN CANCEL";
             return;
@@ -2338,11 +2991,11 @@ public:
         if (!loadPf16(path)) status = "OPEN FAILED";
     }
 
-    bool exportObj(const std::string &path) {
+    bool exportObj(const std::filesystem::path &path) {
         std::ofstream objOut(path, std::ios::binary);
         if (!objOut) return false;
         std::filesystem::path p(path);
-        std::string mtlName = p.stem().string() + ".mtl";
+        std::string mtlName = "PixelForge16.mtl";
         objOut << "mtllib " << mtlName << "\n";
         objOut << "o PixelForge16\n";
         int index = 1;
@@ -2379,8 +3032,8 @@ public:
     }
 
     void exportObjCommand() {
-        static const char filter[] = "Wavefront OBJ (*.obj)\0*.obj\0All Files (*.*)\0*.*\0";
-        std::string path = fileDialog(true, filter, "obj");
+        static const wchar_t filter[] = L"Wavefront OBJ (*.obj)\0*.obj\0All Files (*.*)\0*.*\0";
+        std::filesystem::path path = fileDialog(true, filter, L"obj");
         if (path.empty()) {
             status = "EXPORT CANCEL";
             return;
@@ -2388,7 +3041,7 @@ public:
         status = exportObj(path) ? "OBJ EXPORTED" : "OBJ EXPORT FAILED";
     }
 
-    bool importObj(const std::string &path) {
+    bool importObj(const std::filesystem::path &path) {
         std::ifstream in(path, std::ios::binary);
         if (!in) return false;
         Snapshot before = makeSnapshot();
@@ -2431,8 +3084,8 @@ public:
     }
 
     void importObjCommand() {
-        static const char filter[] = "Wavefront OBJ (*.obj)\0*.obj\0All Files (*.*)\0*.*\0";
-        std::string path = fileDialog(false, filter, "obj");
+        static const wchar_t filter[] = L"Wavefront OBJ (*.obj)\0*.obj\0All Files (*.*)\0*.*\0";
+        std::filesystem::path path = fileDialog(false, filter, L"obj");
         if (path.empty()) {
             status = "IMPORT CANCEL";
             return;
@@ -2512,38 +3165,42 @@ public:
     void openMenu(const std::string &name) {
         menu.open = true;
         menu.name = name;
+        int x = 126;
+        for (const auto &[id, rect] : menuBarRects()) {
+            if (id == name) {
+                x = rect.x;
+                break;
+            }
+        }
+        int minWidth = 104;
         if (name == "FILE") {
             menu.items = {"NEW", "OPEN", "SAVE", "SAVE AS", "IMPORT OBJ", "EXPORT OBJ", "EXPORT IMAGE", "EXIT"};
-            menu.rect = {126, 14, 122, int(menu.items.size()) * 10 + 2};
+            minWidth = 122;
         } else if (name == "EDIT") {
             menu.items = {"UNDO", "REDO", "COPY", "PASTE", "DUPLICATE", "DELETE"};
-            menu.rect = {166, 14, 104, int(menu.items.size()) * 10 + 2};
+            minWidth = 104;
         } else if (name == "ADD") {
             menu.items = {"VERTEX", "PLANE", "CUBE", "PYRAMID", "PRISM", "CYLINDER", "SPHERE"};
-            menu.rect = {206, 14, 94, int(menu.items.size()) * 10 + 2};
+            minWidth = 94;
         } else if (name == "VIEW") {
-            menu.items = {"GRID", "SNAP", "WIREFRAME", "FLAT", "FLAT+WIRE", "LIGHT", "FRAME ALL", "RESET VIEWS"};
-            menu.rect = {238, 14, 126, int(menu.items.size()) * 10 + 2};
+            menu.items = {"GRID", "TOGGLE SNAP", "WIREFRAME", "FLAT", "FLAT+WIRE", "LIGHT", "FRAME ALL", "RESET VIEWS"};
+            minWidth = 126;
+        } else if (name == "LANG") {
+            menu.items = {"LANG EN", "LANG KO", "LANG JA"};
+            minWidth = 104;
         } else {
             menu.items = {"PIXELFORGE 16", "F12 SCREENSHOT", "README"};
-            menu.rect = {278, 14, 112, int(menu.items.size()) * 10 + 2};
+            minWidth = 112;
         }
+        placePopup(x, 14, minWidth);
     }
 
     bool clickMenuBar(int x, int y) {
         if (y >= 14) return false;
-        struct MenuHit { const char *name; IRect rect; };
-        std::array<MenuHit, 5> hits {{
-            {"FILE", {127, 1, 30, 12}},
-            {"EDIT", {168, 1, 30, 12}},
-            {"ADD", {205, 1, 24, 12}},
-            {"VIEW", {235, 1, 30, 12}},
-            {"HELP", {273, 1, 30, 12}},
-        }};
-        for (const auto &h : hits) {
-            if (h.rect.contains(x, y)) {
-                if (menu.open && menu.name == h.name) menu.open = false;
-                else openMenu(h.name);
+        for (const auto &[id, rect] : menuBarRects()) {
+            if (rect.contains(x, y)) {
+                if (menu.open && menu.name == id) menu.open = false;
+                else openMenu(id);
                 return true;
             }
         }
@@ -2552,7 +3209,7 @@ public:
 
     bool clickMenuPopup(int x, int y) {
         if (!menu.open || !menu.rect.contains(x, y)) return false;
-        int index = (y - menu.rect.y - 1) / 10;
+        int index = (y - menu.rect.y - 1) / menuItemHeight();
         if (index < 0 || index >= int(menu.items.size())) return true;
         std::string item = menu.items[size_t(index)];
         menu.open = false;
@@ -2578,8 +3235,9 @@ public:
         else if (item == "EXTRUDE") extrude();
         else if (item == "INSET") inset();
         else if (item == "FLIP" || item == "FLIP FACE") flipFace();
-        else if (item == "SNAP") snapSelectedVertices();
+        else if (item == "SNAP TO GRID") snapSelectedVertices();
         else if (item == "MOVE") status = "DRAG VERTEX DIRECTLY";
+        else if (item == "MOVE Z") beginVertexZMove(mouseX, mouseY);
         else if (item == "COLOR") status = "CLICK PALETTE COLOR";
         else if (item == "ADD") openMenu("ADD");
         else if (item == "VERTEX") addSingleVertex();
@@ -2590,13 +3248,19 @@ public:
         else if (item == "CYLINDER") addCylinder();
         else if (item == "SPHERE") addLowPolySphere();
         else if (item == "GRID") { scene.grid = !scene.grid; status = scene.grid ? "GRID ON" : "GRID OFF"; }
-        else if (item == "SNAP") { scene.snap = !scene.snap; status = scene.snap ? "SNAP ON" : "SNAP OFF"; }
+        else if (item == "TOGGLE SNAP") { scene.snap = !scene.snap; status = scene.snap ? "SNAP ON" : "SNAP OFF"; }
         else if (item == "WIREFRAME") { scene.renderMode = RenderMode::Wireframe; status = "WIREFRAME"; }
         else if (item == "FLAT") { scene.renderMode = RenderMode::Flat; status = "FLAT"; }
         else if (item == "FLAT+WIRE") { scene.renderMode = RenderMode::FlatWire; status = "FLAT+WIRE"; }
         else if (item == "FRAME ALL") frameAll();
         else if (item == "RESET VIEWS") resetViews();
-        else if (item == "README") ShellExecuteA(hwnd, "open", "README.md", nullptr, nullptr, SW_SHOWNORMAL);
+        else if (item == "LANG EN") setLanguage(Locale::English);
+        else if (item == "LANG KO") setLanguage(Locale::Korean);
+        else if (item == "LANG JA") setLanguage(Locale::Japanese);
+        else if (item == "README") {
+            std::filesystem::path readme = executableDir() / L"README.md";
+            ShellExecuteW(hwnd, L"open", readme.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
     }
 
     void onMouseMove(int x, int y, WPARAM keys) {
@@ -2604,6 +3268,10 @@ public:
         mouseX = x;
         mouseY = y;
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (drag.mode == DragMode::VertexZMove) {
+            updateVertexZMove(x, y, ctrl);
+            return;
+        }
         if (drag.mode == DragMode::VertexDrag) {
             updateVertexDrag(x, y, ctrl);
             return;
@@ -2630,6 +3298,11 @@ public:
         mouseY = y;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (drag.mode == DragMode::VertexZMove) {
+            SetCapture(hwnd);
+            updateVertexZMove(x, y, ctrl);
+            return;
+        }
         if (clickMenuPopup(x, y) || clickMenuBar(x, y)) return;
 
         int pal = paletteIndexAt(x, y);
@@ -2708,22 +3381,22 @@ public:
             menu.open = true;
             menu.name = "FACE";
             menu.items = {"EXTRUDE", "INSET", "COLOR", "FLIP FACE", "DUPLICATE", "DELETE"};
-            menu.rect = {clampi(x, 0, kLogicalW - 108), clampi(y, 14, kLogicalH - 80), 104, 62};
+            placePopup(x, y, 104);
         } else if (hover.type == ElementType::Vertex) {
             menu.open = true;
             menu.name = "VERTEX";
-            menu.items = {"MOVE", "MERGE", "DUPLICATE", "SNAP", "DELETE"};
-            menu.rect = {clampi(x, 0, kLogicalW - 100), clampi(y, 14, kLogicalH - 70), 96, 52};
+            menu.items = {"MOVE", "MOVE Z", "MERGE", "DUPLICATE", "SNAP TO GRID", "DELETE"};
+            placePopup(x, y, 106);
         } else if (hover.type == ElementType::Edge) {
             menu.open = true;
             menu.name = "EDGE";
             menu.items = {"EXTRUDE", "DUPLICATE", "DELETE"};
-            menu.rect = {clampi(x, 0, kLogicalW - 100), clampi(y, 14, kLogicalH - 50), 96, 32};
+            placePopup(x, y, 96);
         } else {
             menu.open = true;
             menu.name = "EMPTY";
             menu.items = {"ADD", "PASTE", "GRID", "FRAME ALL"};
-            menu.rect = {clampi(x, 0, kLogicalW - 102), clampi(y, 14, kLogicalH - 56), 98, 42};
+            placePopup(x, y, 98);
         }
     }
 
@@ -2731,6 +3404,16 @@ public:
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        if (drag.mode == DragMode::VertexZMove) {
+            if (key == VK_ESCAPE) cancelDrag();
+            else if (key == VK_RETURN) commitVertexZMove();
+            else if (key == VK_BACK && !drag.typedValue.empty()) {
+                drag.typedValue.pop_back();
+                status = drag.typedValue.empty() ? "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL"
+                                                 : "Z: " + drag.typedValue;
+            }
+            return;
+        }
         if (key == VK_ESCAPE) {
             if (drag.mode != DragMode::None) cancelDrag();
             else { menu.open = false; status = "ESC"; }
@@ -2746,6 +3429,7 @@ public:
         if (ctrl && key == 'C') { copySelection(); return; }
         if (ctrl && key == 'V') { pasteClipboard(); return; }
         if (ctrl && key == VK_HOME) { resetViews(); return; }
+        if (key == 'Z') { beginVertexZMove(mouseX, mouseY); return; }
 
         if (key == VK_SPACE) {
             if (maximizedView.has_value()) maximizedView.reset();
@@ -2785,8 +3469,21 @@ public:
         if (key == VK_DOWN || key == 'S') { nudgeSelection(viewDelta(activeView, 0, 1), shift, alt); return; }
         if (key == VK_LEFT || key == 'A') { nudgeSelection(viewDelta(activeView, -1, 0), shift, alt); return; }
         if (key == VK_RIGHT || key == 'D') { nudgeSelection(viewDelta(activeView, 1, 0), shift, alt); return; }
-        if (key == VK_PRIOR) { nudgeSelection(depthDelta(activeView, 1.0f), shift, alt); return; }
-        if (key == VK_NEXT) { nudgeSelection(depthDelta(activeView, -1.0f), shift, alt); return; }
+        if (key == VK_PRIOR) { nudgeSelection({0.0f, 0.0f, 1.0f}, shift, alt); return; }
+        if (key == VK_NEXT) { nudgeSelection({0.0f, 0.0f, -1.0f}, shift, alt); return; }
+    }
+
+    void onChar(WPARAM ch) {
+        if (drag.mode != DragMode::VertexZMove) return;
+        wchar_t wc = wchar_t(ch);
+        if ((wc >= L'0' && wc <= L'9') || wc == L'-' || wc == L'+' || wc == L'.') {
+            if ((wc == L'-' || wc == L'+') && !drag.typedValue.empty()) return;
+            if (wc == L'.' && drag.typedValue.find('.') != std::string::npos) return;
+            if (drag.typedValue.size() < 16) drag.typedValue.push_back(char(wc));
+            status = "Z: " + drag.typedValue;
+        } else if (wc == L'\r') {
+            commitVertexZMove();
+        }
     }
 
     std::pair<int, int> screenToLogical(int sx, int sy) const {
@@ -2816,7 +3513,7 @@ public:
     }
 
     void saveOnExitPrompt() {
-        int r = MessageBoxA(hwnd, "SAVE CHANGES?", "PIXELFORGE 16", MB_YESNOCANCEL | MB_ICONQUESTION);
+        int r = MessageBoxW(hwnd, L"SAVE CHANGES?", L"PIXELFORGE 16", MB_YESNOCANCEL | MB_ICONQUESTION);
         if (r == IDYES) saveCommand(false);
     }
 };
@@ -2834,15 +3531,54 @@ static int runSelfTest() {
     app.inset();
     if (app.undoStack.empty()) return 13;
 
+    app.clearSelection();
+    Object3D &zObj = app.scene.objects.front();
+    if (zObj.mesh.vertices.size() < 2) return 22;
+    uint32_t zV0 = zObj.mesh.vertices[0].id;
+    uint32_t zV1 = zObj.mesh.vertices[1].id;
+    float beforeZ0 = zObj.mesh.vertices[0].position.z;
+    float beforeZ1 = zObj.mesh.vertices[1].position.z;
+    app.addSelection({ElementType::Vertex, zObj.id, zV0});
+    app.addSelection({ElementType::Vertex, zObj.id, zV1});
+    app.beginVertexZMove(100, 100);
+    app.drag.typedValue = "10";
+    app.commitVertexZMove();
+    const Vertex *afterZ0 = findVertex(app.scene.objects.front(), zV0);
+    const Vertex *afterZ1 = findVertex(app.scene.objects.front(), zV1);
+    if (!afterZ0 || !afterZ1) return 23;
+    if (std::fabs(afterZ0->position.z - (beforeZ0 + 10.0f)) > 0.01f) return 24;
+    if (std::fabs(afterZ1->position.z - (beforeZ1 + 10.0f)) > 0.01f) return 25;
+    app.undo();
+    afterZ0 = findVertex(app.scene.objects.front(), zV0);
+    afterZ1 = findVertex(app.scene.objects.front(), zV1);
+    if (!afterZ0 || !afterZ1) return 26;
+    if (std::fabs(afterZ0->position.z - beforeZ0) > 0.01f) return 27;
+    if (std::fabs(afterZ1->position.z - beforeZ1) > 0.01f) return 28;
+
+    FrameBuffer textFb;
+    textFb.clear(BLACK);
+    drawText(textFb, 2, 4, "파일 日本", WHITE);
+    size_t litPixels = std::count_if(textFb.pixels.begin(), textFb.pixels.end(), [](uint32_t px) {
+        return px == packColor(WHITE);
+    });
+    if (litPixels < 12) return 29;
+
     std::filesystem::path dir = ensureDir(executableDir() / "selftest");
     std::filesystem::path pf16 = dir / "selftest_scene.pf16";
     std::filesystem::path objPath = dir / "selftest_scene.obj";
-    if (!app.savePf16(pf16.string())) return 14;
+    if (!app.savePf16(pf16)) return 14;
+    std::filesystem::path unicodeDir = ensureDir(dir / L"모델");
+    std::filesystem::path unicodePf16 = unicodeDir / L"테스트_모델.pf16";
+    if (!app.savePf16(unicodePf16)) return 30;
 
     App loaded;
-    if (!loaded.loadPf16(pf16.string())) return 15;
+    if (!loaded.loadPf16(pf16)) return 15;
+    if (!loaded.loadPf16(unicodePf16)) return 31;
     if (loaded.scene.objects.empty()) return 16;
-    if (!loaded.exportObj(objPath.string())) return 17;
+    if (!loaded.exportObj(objPath)) return 17;
+    std::filesystem::path unicodeObj = unicodeDir / L"테스트_모델.obj";
+    if (!loaded.exportObj(unicodeObj)) return 32;
+    loaded.language = Locale::Korean;
     loaded.render();
     if (loaded.fb.pixels.empty()) return 18;
     auto pixelAt = [&](int x, int y) {
@@ -2902,6 +3638,9 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     case WM_KEYDOWN:
         g_app.onKeyDown(wParam);
         return 0;
+    case WM_CHAR:
+        g_app.onChar(wParam);
+        return 0;
     case WM_PAINT: {
         PAINTSTRUCT ps {};
         HDC hdc = BeginPaint(hwnd, &ps);
@@ -2925,32 +3664,32 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     using namespace pf16;
-    if (std::string(GetCommandLineA()).find("--self-test") != std::string::npos) {
+    if (std::wstring(GetCommandLineW()).find(L"--self-test") != std::wstring::npos) {
         return runSelfTest();
     }
 
     g_app.instance = hInstance;
 
-    WNDCLASSA wc {};
+    WNDCLASSW wc {};
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = windowProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.lpszClassName = "PixelForge16Window";
-    if (!RegisterClassA(&wc)) {
-        MessageBoxA(nullptr, "RegisterClass failed.", "PIXELFORGE 16", MB_ICONERROR);
+    wc.lpszClassName = L"PixelForge16Window";
+    if (!RegisterClassW(&wc)) {
+        MessageBoxW(nullptr, L"RegisterClass failed.", L"PIXELFORGE 16", MB_ICONERROR);
         return 1;
     }
 
     DWORD style = WS_OVERLAPPEDWINDOW;
     RECT rc {0, 0, kDefaultWindowW, kDefaultWindowH};
     AdjustWindowRect(&rc, style, FALSE);
-    HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "PIXELFORGE 16",
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"PIXELFORGE 16",
                                 style, CW_USEDEFAULT, CW_USEDEFAULT,
                                 rc.right - rc.left, rc.bottom - rc.top,
                                 nullptr, nullptr, hInstance, nullptr);
     if (!hwnd) {
-        MessageBoxA(nullptr, "CreateWindow failed.", "PIXELFORGE 16", MB_ICONERROR);
+        MessageBoxW(nullptr, L"CreateWindow failed.", L"PIXELFORGE 16", MB_ICONERROR);
         return 1;
     }
     g_app.hwnd = hwnd;

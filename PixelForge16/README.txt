@@ -2,7 +2,8 @@
 
 PixelForge 16 is a small native Windows low-poly modeler built around a fixed
 640x480 logical framebuffer, a 16 color VGA-style palette, direct mouse editing,
-and a CPU software renderer.
+and a CPU software renderer. The interface uses a retro blue/black DOS CAD style:
+black viewports, blue pixel panels, cyan hover feedback, and yellow selection.
 
 ## Build
 
@@ -19,6 +20,12 @@ The packaged executable is written to:
 
 ```text
 dist\PixelForge16\PixelForge16.exe
+```
+
+A Korean beginner tutorial is available at:
+
+```text
+docs\tutorial_ko.md
 ```
 
 ## Mouse Controls
@@ -56,7 +63,8 @@ M                   Merge selected vertices, or cycle render mode
 X / Delete          Delete selection
 D                   Duplicate object/selection
 Arrow/WASD          Nudge selected vertices
-PageUp/PageDown     Nudge selected vertices in view depth
+PageUp/PageDown     Nudge selected vertices on world Z
+Z                   Z-axis move mode: drag, or type a value and press Enter
 Shift               10x nudge
 Alt                 0.1x nudge
 Ctrl while dragging Temporarily invert snap
@@ -74,10 +82,16 @@ File > Export OBJ   Export OBJ + 16-color MTL
 F12                 Save perspective screenshot BMP
 ```
 
+## Language
+
+```text
+LANG menu           Switch English / Korean / Japanese immediately
+settings.ini        Persists language=en, language=ko, or language=ja
+```
+
 ## Notes
 
 This is an MVP: geometry, 16 colors, flat/wire rendering, direct manipulation,
 undo/redo, save/load, OBJ import/export, and screenshots are implemented. Texture
 painting, UV editing, animation, materials, physics, node graphs, and PBR are
 intentionally out of scope.
-

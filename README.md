@@ -63,7 +63,8 @@ M                   Merge selected vertices, or cycle render mode
 X / Delete          Delete selection
 D                   Duplicate object/selection
 Arrow/WASD          Nudge selected vertices
-PageUp/PageDown     Nudge selected vertices in view depth
+PageUp/PageDown     Nudge selected vertices on world Z
+Z                   Z-axis move mode: drag, or type a value and press Enter
 Shift               10x nudge
 Alt                 0.1x nudge
 Ctrl while dragging Temporarily invert snap
@@ -79,6 +80,13 @@ Ctrl+Shift+S        Save as .pf16
 File > Import OBJ   Import v/f OBJ geometry
 File > Export OBJ   Export OBJ + 16-color MTL
 F12                 Save perspective screenshot BMP
+```
+
+## Language
+
+```text
+LANG menu           Switch English / Korean / Japanese immediately
+settings.ini        Persists language=en, language=ko, or language=ja
 ```
 
 ## Notes
