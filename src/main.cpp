@@ -435,6 +435,11 @@ static const TranslationEntry kTranslations[] = {
     {"cmd.screenshot", "F12 SCREENSHOT", "F12 스크린샷", "F12 スクショ"},
     {"cmd.readme", "README", "도움말 파일", "README"},
     {"cmd.move", "MOVE", "이동", "移動"},
+    {"cmd.move_object", "MOVE OBJECT", "오브젝트 이동", "オブジェクト移動"},
+    {"cmd.pan", "PAN VIEW", "화면 이동", "表示移動"},
+    {"cmd.frame_selected", "FRAME SELECTION", "선택 보기", "選択表示"},
+    {"cmd.reset_view", "RESET VIEW", "화면 초기화", "表示リセット"},
+    {"cmd.reset_all_views", "RESET ALL VIEWS", "모든 화면 초기화", "全表示リセット"},
     {"cmd.move_z", "MOVE Z", "Z 이동", "Z移動"},
     {"cmd.merge", "MERGE", "병합", "結合"},
     {"cmd.snap_to_grid", "SNAP TO GRID", "격자 맞춤", "グリッドへ"},
@@ -459,6 +464,7 @@ static const TranslationEntry kTranslations[] = {
     {"status.add_sphere", "ADD SPHERE", "구 추가", "球追加"},
     {"status.add_vertex", "ADD VERTEX", "정점 추가", "頂点追加"},
     {"status.move_vertex", "MOVE VERTEX", "정점 이동", "頂点移動"},
+    {"status.move_object", "MOVE OBJECT", "오브젝트 이동", "オブジェクト移動"},
     {"status.move_z", "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL", "Z 이동 | 드래그 또는 숫자 | ENTER 적용 | ESC 취소", "Z移動 | ドラッグまたは数値 | ENTER適用 | ESC取消"},
     {"status.drag_move", "DRAG TO MOVE", "드래그 이동", "ドラッグ移動"},
     {"status.move_done", "MOVE DONE", "이동 완료", "移動完了"},
@@ -483,11 +489,16 @@ static const TranslationEntry kTranslations[] = {
     {"status.extrude", "EXTRUDE 1 UNIT", "1 단위 돌출", "1単位押出"},
     {"status.inset", "INSET", "삽입", "インセット"},
     {"status.focus", "FOCUS", "초점", "フォーカス"},
+    {"status.frame_selection", "FRAME SELECTION", "선택 보기", "選択表示"},
     {"status.frame_all", "FRAME ALL", "전체 보기", "全体表示"},
+    {"status.reset_view", "RESET VIEW", "화면 초기화", "表示リセット"},
+    {"status.reset_all_views", "RESET ALL VIEWS", "모든 화면 초기화", "全表示リセット"},
     {"status.reset_views", "RESET VIEWS", "보기 초기화", "表示リセット"},
     {"status.zoom", "ZOOM", "확대/축소", "ズーム"},
     {"status.pan", "PAN", "이동 보기", "パン"},
+    {"status.pan_view", "PAN VIEW", "화면 이동", "表示移動"},
     {"status.orbit", "ORBIT", "회전 보기", "オービット"},
+    {"status.orbit_view", "ORBIT VIEW", "화면 회전", "表示回転"},
     {"status.saved", "SAVED", "저장됨", "保存済み"},
     {"status.loaded", "LOADED", "불러옴", "読込済み"},
     {"status.save_cancel", "SAVE CANCEL", "저장 취소", "保存取消"},
@@ -1087,7 +1098,12 @@ public:
         if (id == "F12 SCREENSHOT") return "cmd.screenshot";
         if (id == "README") return "cmd.readme";
         if (id == "MOVE") return "cmd.move";
+        if (id == "PAN") return "cmd.pan";
+        if (id == "FRAME SELECTED") return "cmd.frame_selected";
+        if (id == "RESET VIEW") return "cmd.reset_view";
+        if (id == "RESET ALL VIEWS") return "cmd.reset_all_views";
         if (id == "MOVE Z") return "cmd.move_z";
+        if (id == "MOVE OBJECT") return "cmd.move_object";
         if (id == "MERGE") return "cmd.merge";
         if (id == "SNAP TO GRID") return "cmd.snap_to_grid";
         if (id == "EXTRUDE") return "cmd.extrude";
@@ -1132,6 +1148,7 @@ public:
             { "ADD SPHERE", "status.add_sphere" },
             { "ADD VERTEX", "status.add_vertex" },
             { "MOVE VERTEX", "status.move_vertex" },
+            { "MOVE OBJECT", "status.move_object" },
             { "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL", "status.move_z" },
             { "DRAG TO MOVE", "status.drag_move" },
             { "MOVE DONE", "status.move_done" },
@@ -1156,11 +1173,16 @@ public:
             { "EXTRUDE 1 UNIT", "status.extrude" },
             { "INSET", "status.inset" },
             { "FOCUS", "status.focus" },
+            { "FRAME SELECTION", "status.frame_selection" },
             { "FRAME ALL", "status.frame_all" },
+            { "RESET VIEW", "status.reset_view" },
+            { "RESET ALL VIEWS", "status.reset_all_views" },
             { "RESET VIEWS", "status.reset_views" },
             { "ZOOM", "status.zoom" },
             { "PAN", "status.pan" },
+            { "PAN VIEW", "status.pan_view" },
             { "ORBIT", "status.orbit" },
+            { "ORBIT VIEW", "status.orbit_view" },
             { "SAVED", "status.saved" },
             { "LOADED", "status.loaded" },
             { "SAVE CANCEL", "status.save_cancel" },
@@ -1193,6 +1215,7 @@ public:
         }
         if (status.rfind("LANGUAGE ", 0) == 0) return text("status.language") + " " + status.substr(9);
         if (status.rfind("COLOR ", 0) == 0) return text("label.color") + status.substr(5);
+        if (status.rfind("MOVE OBJECT |", 0) == 0) return text("status.move_object") + status.substr(11);
         return status;
     }
 
@@ -1566,6 +1589,19 @@ public:
         return {dx * inv, -dy * inv, 0};
     }
 
+    Vec3 objectDragDelta(ViewKind kind, int dx, int dy) const {
+        const ViewState *v = stateFor(kind);
+        if (kind != ViewKind::Perspective) return viewDelta(kind, dx, dy);
+
+        Vec3 cam = cameraPosition(*v);
+        Vec3 forward = normalize(v->center - cam);
+        Vec3 right = normalize(cross(forward, {0, 1, 0}));
+        if (length(right) < 0.01f) right = {1, 0, 0};
+        Vec3 up = normalize(cross(right, forward));
+        float units = v->distance / 220.0f;
+        return right * (float(dx) * units) - up * (float(dy) * units);
+    }
+
     Vec3 depthDelta(ViewKind kind, float amount) const {
         if (kind == ViewKind::Top) return {0, amount, 0};
         if (kind == ViewKind::Front) return {0, 0, amount};
@@ -1621,8 +1657,37 @@ public:
         }
     }
 
+    void drawObjectBounds(const ViewportDraw &vd, const Object3D &obj, uint8_t color) {
+        if (obj.mesh.vertices.empty()) return;
+        Vec3 minP {1.0e9f, 1.0e9f, 1.0e9f};
+        Vec3 maxP {-1.0e9f, -1.0e9f, -1.0e9f};
+        for (const Vertex &v : obj.mesh.vertices) {
+            Vec3 p = transformPoint(v.position, obj.transform);
+            minP.x = std::min(minP.x, p.x); minP.y = std::min(minP.y, p.y); minP.z = std::min(minP.z, p.z);
+            maxP.x = std::max(maxP.x, p.x); maxP.y = std::max(maxP.y, p.y); maxP.z = std::max(maxP.z, p.z);
+        }
+        std::array<Vec3, 8> corners {{
+            {minP.x, minP.y, minP.z}, {maxP.x, minP.y, minP.z}, {maxP.x, maxP.y, minP.z}, {minP.x, maxP.y, minP.z},
+            {minP.x, minP.y, maxP.z}, {maxP.x, minP.y, maxP.z}, {maxP.x, maxP.y, maxP.z}, {minP.x, maxP.y, maxP.z}
+        }};
+        const std::array<std::pair<int, int>, 12> edges {{
+            std::pair<int, int>{0, 1}, std::pair<int, int>{1, 2}, std::pair<int, int>{2, 3}, std::pair<int, int>{3, 0},
+            std::pair<int, int>{4, 5}, std::pair<int, int>{5, 6}, std::pair<int, int>{6, 7}, std::pair<int, int>{7, 4},
+            std::pair<int, int>{0, 4}, std::pair<int, int>{1, 5}, std::pair<int, int>{2, 6}, std::pair<int, int>{3, 7}
+        }};
+        for (auto [a, b] : edges) {
+            Projected pa = projectPoint(vd, corners[size_t(a)]);
+            Projected pb = projectPoint(vd, corners[size_t(b)]);
+            if (!pa.ok || !pb.ok) continue;
+            fb.lineZ(pa.x, pa.y, pa.depth - 0.02f, pb.x, pb.y, pb.depth - 0.02f, color, vd.rect);
+        }
+    }
+
     void drawGeometryHighlights(const ViewportDraw &vd, bool drawNormalVertices) {
         for (const auto &obj : scene.objects) {
+            bool objectSelected = isSelected(ElementType::Object, obj.id, obj.id);
+            if (objectSelected) drawObjectBounds(vd, obj, kTheme.selection);
+
             for (const Face &face : obj.mesh.faces) {
                 bool selected = isSelected(ElementType::Face, obj.id, face.id);
                 bool hovered = hover.type == ElementType::Face && hover.objectId == obj.id && hover.id == face.id;
@@ -1646,38 +1711,115 @@ public:
 
     void drawGrid(const ViewportDraw &vd) {
         const ViewState &view = *vd.state;
-        if (view.kind == ViewKind::Perspective || !scene.grid) return;
+        if (view.kind == ViewKind::Perspective) {
+            drawPerspectiveAxes(vd);
+            return;
+        }
+        if (!scene.grid) {
+            drawOriginMarker(vd);
+            return;
+        }
         float grid = std::max(0.001f, scene.gridSize);
         float step = grid * view.zoom;
-        if (step < 3.0f) return;
 
         Vec3 axisH, axisV;
+        uint8_t colorH = LIGHT_RED;
+        uint8_t colorV = LIGHT_CYAN;
         if (view.kind == ViewKind::Top) {
             axisH = {1, 0, 0}; axisV = {0, 0, 1};
+            colorH = LIGHT_RED; colorV = LIGHT_CYAN;
         } else if (view.kind == ViewKind::Front) {
             axisH = {1, 0, 0}; axisV = {0, 1, 0};
+            colorH = LIGHT_RED; colorV = LIGHT_GREEN;
         } else {
             axisH = {0, 0, 1}; axisV = {0, 1, 0};
+            colorH = LIGHT_CYAN; colorV = LIGHT_GREEN;
         }
 
         float spanH = float(vd.rect.w) / view.zoom * 0.5f + grid * 2.0f;
         float spanV = float(vd.rect.h) / view.zoom * 0.5f + grid * 2.0f;
-        for (float a = std::floor(-spanH / grid) * grid; a <= spanH; a += grid) {
-            Vec3 p0 = view.center + axisH * a - axisV * spanV;
-            Vec3 p1 = view.center + axisH * a + axisV * spanV;
-            Projected s0 = projectPoint(vd, p0);
-            Projected s1 = projectPoint(vd, p1);
-            uint8_t col = std::fabs(a) < 0.001f ? kTheme.origin : kTheme.gridMinor;
-            fb.line(s0.x, s0.y, s1.x, s1.y, col, &vd.rect);
+        float centerH = dot(view.center, axisH);
+        float centerV = dot(view.center, axisV);
+        float hMin = std::floor((centerH - spanH) / grid) * grid;
+        float hMax = std::ceil((centerH + spanH) / grid) * grid;
+        float vMin = std::floor((centerV - spanV) / grid) * grid;
+        float vMax = std::ceil((centerV + spanV) / grid) * grid;
+
+        auto gridColor = [&](float coord) {
+            float units = coord / grid;
+            int nearest = int(std::round(units));
+            if (std::fabs(units - float(nearest)) < 0.001f && nearest % 5 == 0) return kTheme.gridMajor;
+            return kTheme.gridMinor;
+        };
+
+        if (step >= 3.0f) {
+            for (float h = hMin; h <= hMax + grid * 0.5f; h += grid) {
+                Vec3 p0 = axisH * h + axisV * vMin;
+                Vec3 p1 = axisH * h + axisV * vMax;
+                Projected s0 = projectPoint(vd, p0);
+                Projected s1 = projectPoint(vd, p1);
+                uint8_t col = std::fabs(h) < 0.001f ? colorV : gridColor(h);
+                fb.line(s0.x, s0.y, s1.x, s1.y, col, &vd.rect);
+            }
+            for (float vCoord = vMin; vCoord <= vMax + grid * 0.5f; vCoord += grid) {
+                Vec3 p0 = axisH * hMin + axisV * vCoord;
+                Vec3 p1 = axisH * hMax + axisV * vCoord;
+                Projected s0 = projectPoint(vd, p0);
+                Projected s1 = projectPoint(vd, p1);
+                uint8_t col = std::fabs(vCoord) < 0.001f ? colorH : gridColor(vCoord);
+                fb.line(s0.x, s0.y, s1.x, s1.y, col, &vd.rect);
+            }
+        } else {
+            Vec3 axisV0 = axisV * vMin;
+            Vec3 axisV1 = axisV * vMax;
+            Projected sv0 = projectPoint(vd, axisV0);
+            Projected sv1 = projectPoint(vd, axisV1);
+            fb.line(sv0.x, sv0.y, sv1.x, sv1.y, colorV, &vd.rect);
+
+            Vec3 axisH0 = axisH * hMin;
+            Vec3 axisH1 = axisH * hMax;
+            Projected sh0 = projectPoint(vd, axisH0);
+            Projected sh1 = projectPoint(vd, axisH1);
+            fb.line(sh0.x, sh0.y, sh1.x, sh1.y, colorH, &vd.rect);
         }
-        for (float b = std::floor(-spanV / grid) * grid; b <= spanV; b += grid) {
-            Vec3 p0 = view.center - axisH * spanH + axisV * b;
-            Vec3 p1 = view.center + axisH * spanH + axisV * b;
-            Projected s0 = projectPoint(vd, p0);
-            Projected s1 = projectPoint(vd, p1);
-            uint8_t col = std::fabs(b) < 0.001f ? kTheme.gridMajor : kTheme.gridMinor;
-            fb.line(s0.x, s0.y, s1.x, s1.y, col, &vd.rect);
+
+        drawOriginMarker(vd);
+    }
+
+    float sceneAxisLength() const {
+        float maxAbs = 4.0f;
+        for (const auto &obj : scene.objects) {
+            for (const auto &v : obj.mesh.vertices) {
+                Vec3 p = transformPoint(v.position, obj.transform);
+                maxAbs = std::max({maxAbs, std::fabs(p.x), std::fabs(p.y), std::fabs(p.z)});
+            }
         }
+        float grid = std::max(0.001f, scene.gridSize);
+        return std::ceil((maxAbs + grid * 2.0f) / grid) * grid;
+    }
+
+    void drawPerspectiveAxes(const ViewportDraw &vd) {
+        float len = sceneAxisLength();
+        auto drawAxis = [&](Vec3 axis, uint8_t color) {
+            Projected p0 = projectPoint(vd, axis * -len);
+            Projected p1 = projectPoint(vd, axis * len);
+            if (!p0.ok || !p1.ok) return;
+            fb.line(p0.x, p0.y, p1.x, p1.y, color, &vd.rect);
+        };
+        drawAxis({1, 0, 0}, LIGHT_RED);
+        drawAxis({0, 1, 0}, LIGHT_GREEN);
+        drawAxis({0, 0, 1}, LIGHT_CYAN);
+        drawOriginMarker(vd);
+    }
+
+    void drawOriginMarker(const ViewportDraw &vd) {
+        Projected origin = projectPoint(vd, {0, 0, 0});
+        if (!origin.ok || !vd.rect.contains(origin.x, origin.y)) return;
+        fb.pixelClip(origin.x, origin.y, WHITE, vd.rect);
+        fb.pixelClip(origin.x - 1, origin.y, WHITE, vd.rect);
+        fb.pixelClip(origin.x + 1, origin.y, WHITE, vd.rect);
+        fb.pixelClip(origin.x, origin.y - 1, WHITE, vd.rect);
+        fb.pixelClip(origin.x, origin.y + 1, WHITE, vd.rect);
     }
 
     void renderMesh(const ViewportDraw &vd) {
@@ -1723,6 +1865,7 @@ public:
 
         if (drawWire) {
             for (const auto &obj : scene.objects) {
+                bool objectSelected = isSelected(ElementType::Object, obj.id, obj.id);
                 std::set<std::pair<uint32_t, uint32_t>> drawn;
                 for (const Face &face : obj.mesh.faces) {
                     for (size_t i = 0; i < face.vertices.size(); ++i) {
@@ -1738,7 +1881,7 @@ public:
                         Projected pb = projectPoint(vd, transformPoint(b->position, obj.transform));
                         if (!pa.ok || !pb.ok) continue;
                         uint8_t color = kTheme.wire;
-                        if (isSelected(ElementType::Face, obj.id, face.id)) {
+                        if (objectSelected || isSelected(ElementType::Face, obj.id, face.id)) {
                             color = kTheme.selection;
                         }
                         if (hover.type == ElementType::Edge && hover.objectId == obj.id &&
@@ -1845,11 +1988,14 @@ public:
         if (item == "GRID") return "ON/OFF";
         if (item == "TOGGLE SNAP") return "ON/OFF";
         if (item == "SNAP TO GRID") return "CTRL";
+        if (item == "PAN") return "MMB";
         if (item == "WIREFRAME") return "M";
         if (item == "FLAT") return "M";
         if (item == "FLAT+WIRE") return "M";
+        if (item == "FRAME SELECTED") return "F";
         if (item == "FRAME ALL") return "HOME";
         if (item == "RESET VIEWS") return "CTRL+HOME";
+        if (item == "RESET ALL VIEWS") return "CTRL+HOME";
         return {};
     }
 
@@ -2230,6 +2376,84 @@ public:
         drag = DragState {};
     }
 
+    bool isObjectSelected(uint32_t objectId) const {
+        return isSelected(ElementType::Object, objectId, objectId);
+    }
+
+    void selectObjectFromHover(bool shift, bool ctrl) {
+        if (hover.objectId == 0) return;
+        ElementRef r {ElementType::Object, hover.objectId, hover.objectId};
+        if (ctrl) {
+            toggleSelection(r);
+        } else if (shift) {
+            addSelection(r);
+        } else {
+            clearSelection();
+            addSelection(r);
+        }
+    }
+
+    void beginObjectDrag(int x, int y, ViewKind view) {
+        std::vector<ElementRef> objects = selectedObjects();
+        if (objects.empty()) {
+            status = "NOTHING SELECTED";
+            return;
+        }
+        drag = DragState {};
+        drag.mode = DragMode::ObjectDrag;
+        drag.view = view;
+        drag.startX = drag.lastX = x;
+        drag.startY = drag.lastY = y;
+        drag.before = makeSnapshot();
+        for (const ElementRef &r : objects) {
+            Object3D *obj = findObject(scene, r.objectId);
+            if (obj) drag.objects.push_back({obj->id, obj->transform.position});
+        }
+        if (drag.objects.empty()) {
+            drag = DragState {};
+            status = "NOTHING SELECTED";
+            return;
+        }
+        status = "MOVE OBJECT";
+    }
+
+    void updateObjectDrag(int x, int y, bool ctrlDown) {
+        int dx = x - drag.startX;
+        int dy = y - drag.startY;
+        if (!drag.changed && std::abs(dx) < 3 && std::abs(dy) < 3) {
+            drag.lastX = x;
+            drag.lastY = y;
+            return;
+        }
+
+        Vec3 deltaWorld = objectDragDelta(drag.view, dx, dy);
+        Vec3 changedMask {std::fabs(deltaWorld.x) > 0.00001f ? 1.0f : 0.0f,
+                          std::fabs(deltaWorld.y) > 0.00001f ? 1.0f : 0.0f,
+                          std::fabs(deltaWorld.z) > 0.00001f ? 1.0f : 0.0f};
+        bool snapOn = ctrlDown ? !scene.snap : scene.snap;
+        Vec3 firstPos {};
+        bool haveFirst = false;
+        for (const auto &item : drag.objects) {
+            Object3D *obj = findObject(scene, item.objectId);
+            if (!obj) continue;
+            obj->transform.position = snapPosition(item.original + deltaWorld, item.original, changedMask, snapOn);
+            if (!haveFirst) {
+                firstPos = obj->transform.position;
+                haveFirst = true;
+            }
+        }
+
+        drag.lastX = x;
+        drag.lastY = y;
+        drag.changed = true;
+        status = "MOVE OBJECT";
+        if (haveFirst) {
+            Vec3 shownDelta = firstPos - drag.objects.front().original;
+            status += " | X:" + formatFloat(firstPos.x) + " Y:" + formatFloat(firstPos.y) + " Z:" + formatFloat(firstPos.z);
+            status += " | dX:" + formatFloat(shownDelta.x) + " dY:" + formatFloat(shownDelta.y) + " dZ:" + formatFloat(shownDelta.z);
+        }
+    }
+
     void beginBoxSelect(int x, int y, ViewKind view) {
         drag = DragState {};
         drag.mode = DragMode::BoxSelect;
@@ -2267,7 +2491,7 @@ public:
         drag.view = view;
         drag.startX = drag.lastX = x;
         drag.startY = drag.lastY = y;
-        status = pan ? "PAN" : "ORBIT";
+        status = pan ? "PAN VIEW" : "ORBIT VIEW";
     }
 
     void updateCameraDrag(int x, int y) {
@@ -2300,6 +2524,9 @@ public:
         } else if (drag.mode == DragMode::VertexZMove) {
             commitVertexZMove();
             return;
+        } else if (drag.mode == DragMode::ObjectDrag && drag.changed) {
+            pushUndo(drag.before);
+            status = "MOVE DONE";
         } else if (drag.mode == DragMode::BoxSelect) {
             // Selection-only changes are intentionally not undo history entries.
         }
@@ -2307,7 +2534,7 @@ public:
     }
 
     void cancelDrag() {
-        if (drag.mode == DragMode::VertexDrag || drag.mode == DragMode::VertexZMove) {
+        if (drag.mode == DragMode::VertexDrag || drag.mode == DragMode::VertexZMove || drag.mode == DragMode::ObjectDrag) {
             restoreSnapshot(drag.before);
             status = "MOVE CANCEL";
             if (hwnd) ReleaseCapture();
@@ -2800,7 +3027,7 @@ public:
         }
         c = c / float(count);
         for (auto &v : views) v.center = c;
-        status = "FOCUS";
+        status = "FRAME SELECTION";
     }
 
     void resetViews() {
@@ -2811,7 +3038,17 @@ public:
             v.pitch = radians(25.0f);
             v.distance = 10.0f;
         }
-        status = "RESET VIEWS";
+        status = "RESET ALL VIEWS";
+    }
+
+    void resetActiveView() {
+        ViewState *v = stateFor(activeView);
+        v->center = {0, 0, 0};
+        v->zoom = 18.0f;
+        v->yaw = radians(35.0f);
+        v->pitch = radians(25.0f);
+        v->distance = 10.0f;
+        status = "RESET VIEW";
     }
 
     void copySelection() {
@@ -3183,7 +3420,7 @@ public:
             menu.items = {"VERTEX", "PLANE", "CUBE", "PYRAMID", "PRISM", "CYLINDER", "SPHERE"};
             minWidth = 94;
         } else if (name == "VIEW") {
-            menu.items = {"GRID", "TOGGLE SNAP", "WIREFRAME", "FLAT", "FLAT+WIRE", "LIGHT", "FRAME ALL", "RESET VIEWS"};
+            menu.items = {"GRID", "TOGGLE SNAP", "WIREFRAME", "FLAT", "FLAT+WIRE", "LIGHT", "FRAME ALL", "FRAME SELECTED", "RESET VIEW", "RESET ALL VIEWS"};
             minWidth = 126;
         } else if (name == "LANG") {
             menu.items = {"LANG EN", "LANG KO", "LANG JA"};
@@ -3252,8 +3489,11 @@ public:
         else if (item == "WIREFRAME") { scene.renderMode = RenderMode::Wireframe; status = "WIREFRAME"; }
         else if (item == "FLAT") { scene.renderMode = RenderMode::Flat; status = "FLAT"; }
         else if (item == "FLAT+WIRE") { scene.renderMode = RenderMode::FlatWire; status = "FLAT+WIRE"; }
+        else if (item == "PAN") status = "PAN VIEW";
         else if (item == "FRAME ALL") frameAll();
-        else if (item == "RESET VIEWS") resetViews();
+        else if (item == "FRAME SELECTED") focusSelection();
+        else if (item == "RESET VIEW") resetActiveView();
+        else if (item == "RESET VIEWS" || item == "RESET ALL VIEWS") resetViews();
         else if (item == "LANG EN") setLanguage(Locale::English);
         else if (item == "LANG KO") setLanguage(Locale::Korean);
         else if (item == "LANG JA") setLanguage(Locale::Japanese);
@@ -3270,6 +3510,10 @@ public:
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         if (drag.mode == DragMode::VertexZMove) {
             updateVertexZMove(x, y, ctrl);
+            return;
+        }
+        if (drag.mode == DragMode::ObjectDrag) {
+            updateObjectDrag(x, y, ctrl);
             return;
         }
         if (drag.mode == DragMode::VertexDrag) {
@@ -3298,6 +3542,7 @@ public:
         mouseY = y;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
         if (drag.mode == DragMode::VertexZMove) {
             SetCapture(hwnd);
             updateVertexZMove(x, y, ctrl);
@@ -3319,8 +3564,13 @@ public:
         activeView = vd->state->kind;
         hover = pick(x, y);
         menu.open = false;
-        if (hover.type == ElementType::Vertex) {
+        if (alt && hover.objectId != 0) {
+            selectObjectFromHover(shift, ctrl);
+            if (isObjectSelected(hover.objectId)) beginObjectDrag(x, y, vd->state->kind);
+        } else if (hover.type == ElementType::Vertex) {
             beginVertexDrag(x, y, vd->state->kind, shift, ctrl);
+        } else if (hover.objectId != 0 && isObjectSelected(hover.objectId) && !shift && !ctrl) {
+            beginObjectDrag(x, y, vd->state->kind);
         } else if (hover.type == ElementType::Face) {
             selectFromHover(shift, ctrl);
         } else {
@@ -3355,7 +3605,8 @@ public:
         SetCapture(hwnd);
         activeView = vd->state->kind;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        beginCameraDrag(x, y, vd->state->kind, shift);
+        bool pan = shift || vd->state->kind != ViewKind::Perspective;
+        beginCameraDrag(x, y, vd->state->kind, pan);
     }
 
     void onMouseWheel(int x, int y, int delta) {
@@ -3395,8 +3646,8 @@ public:
         } else {
             menu.open = true;
             menu.name = "EMPTY";
-            menu.items = {"ADD", "PASTE", "GRID", "FRAME ALL"};
-            placePopup(x, y, 98);
+            menu.items = {"PAN", "FRAME ALL", "FRAME SELECTED", "RESET VIEW", "RESET ALL VIEWS", "ADD", "PASTE", "GRID"};
+            placePopup(x, y, 128);
         }
     }
 
@@ -3554,6 +3805,131 @@ static int runSelfTest() {
     if (!afterZ0 || !afterZ1) return 26;
     if (std::fabs(afterZ0->position.z - beforeZ0) > 0.01f) return 27;
     if (std::fabs(afterZ1->position.z - beforeZ1) > 0.01f) return 28;
+
+    app.scene.snap = false;
+    uint32_t moveObjectId = app.scene.objects.front().id;
+    Object3D *moveObj = findObject(app.scene, moveObjectId);
+    if (!moveObj || moveObj->mesh.vertices.empty()) return 33;
+    Vec3 localBefore = moveObj->mesh.vertices.front().position;
+    Vec3 objectBefore = moveObj->transform.position;
+    app.clearSelection();
+    app.addSelection({ElementType::Object, moveObjectId, moveObjectId});
+    app.beginObjectDrag(100, 100, ViewKind::Top);
+    app.updateObjectDrag(136, 82, false);
+    app.finishDrag();
+    moveObj = findObject(app.scene, moveObjectId);
+    if (!moveObj) return 34;
+    if (std::fabs(moveObj->mesh.vertices.front().position.x - localBefore.x) > 0.001f) return 35;
+    if (std::fabs(moveObj->transform.position.x - (objectBefore.x + 2.0f)) > 0.01f) return 36;
+    if (std::fabs(moveObj->transform.position.z - (objectBefore.z + 1.0f)) > 0.01f) return 37;
+    app.undo();
+    moveObj = findObject(app.scene, moveObjectId);
+    if (!moveObj) return 38;
+    if (std::fabs(moveObj->transform.position.x - objectBefore.x) > 0.01f) return 39;
+    app.redo();
+    moveObj = findObject(app.scene, moveObjectId);
+    if (!moveObj) return 40;
+    if (std::fabs(moveObj->transform.position.x - (objectBefore.x + 2.0f)) > 0.01f) return 41;
+
+    Vec3 frontDelta = app.objectDragDelta(ViewKind::Front, 18, -18);
+    Vec3 sideDelta = app.objectDragDelta(ViewKind::Side, 18, -18);
+    if (std::fabs(frontDelta.x - 1.0f) > 0.01f || std::fabs(frontDelta.y - 1.0f) > 0.01f || std::fabs(frontDelta.z) > 0.01f) return 42;
+    if (std::fabs(sideDelta.z - 1.0f) > 0.01f || std::fabs(sideDelta.y - 1.0f) > 0.01f || std::fabs(sideDelta.x) > 0.01f) return 43;
+    Vec3 perspectiveDelta = app.objectDragDelta(ViewKind::Perspective, 20, -12);
+    if (length(perspectiveDelta) <= 0.001f) return 44;
+
+    app.addCube(false);
+    uint32_t secondObjectId = app.scene.objects.back().id;
+    Vec3 firstBeforeMulti = findObject(app.scene, moveObjectId)->transform.position;
+    Vec3 secondBeforeMulti = app.scene.objects.back().transform.position;
+    app.clearSelection();
+    app.addSelection({ElementType::Object, moveObjectId, moveObjectId});
+    app.addSelection({ElementType::Object, secondObjectId, secondObjectId});
+    app.beginObjectDrag(50, 50, ViewKind::Front);
+    app.updateObjectDrag(68, 50, false);
+    app.finishDrag();
+    Object3D *firstMulti = findObject(app.scene, moveObjectId);
+    Object3D *secondMulti = findObject(app.scene, secondObjectId);
+    if (!firstMulti || !secondMulti) return 45;
+    if (std::fabs(firstMulti->transform.position.x - (firstBeforeMulti.x + 1.0f)) > 0.01f) return 46;
+    if (std::fabs(secondMulti->transform.position.x - (secondBeforeMulti.x + 1.0f)) > 0.01f) return 47;
+
+    ViewState *topView = app.stateFor(ViewKind::Top);
+    ViewState *frontView = app.stateFor(ViewKind::Front);
+    ViewState *sideView = app.stateFor(ViewKind::Side);
+    ViewState *perspectiveView = app.stateFor(ViewKind::Perspective);
+    auto viewportFor = [&](ViewKind kind) {
+        auto vds = app.layoutViewports();
+        for (const auto &vd : vds) {
+            if (vd.state->kind == kind) return vd;
+        }
+        return vds.front();
+    };
+    auto originProjection = [&](ViewKind kind) {
+        ViewportDraw vd = viewportFor(kind);
+        return app.projectPoint(vd, {0, 0, 0});
+    };
+    ViewportDraw topVdBefore = viewportFor(ViewKind::Top);
+    Projected topOriginBefore = app.projectPoint(topVdBefore, {0, 0, 0});
+    if (!topOriginBefore.ok) return 55;
+    if (std::abs(topOriginBefore.x - (topVdBefore.rect.x + topVdBefore.rect.w / 2)) > 1 ||
+        std::abs(topOriginBefore.y - (topVdBefore.rect.y + topVdBefore.rect.h / 2)) > 1) return 56;
+    Vec3 topCenterBefore = topView->center;
+    Vec3 frontCenterBefore = frontView->center;
+    Vec3 objectPosBeforePan = firstMulti->transform.position;
+    app.beginCameraDrag(100, 100, ViewKind::Top, true);
+    app.updateCameraDrag(118, 82);
+    app.finishDrag();
+    ViewportDraw topVdAfter = viewportFor(ViewKind::Top);
+    Projected topOriginAfter = app.projectPoint(topVdAfter, {0, 0, 0});
+    if (!topOriginAfter.ok) return 57;
+    if (std::abs(topOriginAfter.x - (topVdAfter.rect.x + topVdAfter.rect.w / 2)) <= 1 &&
+        std::abs(topOriginAfter.y - (topVdAfter.rect.y + topVdAfter.rect.h / 2)) <= 1) return 58;
+    if (std::abs(topOriginAfter.x - topOriginBefore.x) <= 1 &&
+        std::abs(topOriginAfter.y - topOriginBefore.y) <= 1) return 59;
+    if (std::fabs(firstMulti->transform.position.x - objectPosBeforePan.x) > 0.001f) return 48;
+    if (std::fabs(topView->center.x - topCenterBefore.x) <= 0.001f && std::fabs(topView->center.z - topCenterBefore.z) <= 0.001f) return 49;
+    if (std::fabs(frontView->center.x - frontCenterBefore.x) > 0.001f ||
+        std::fabs(frontView->center.y - frontCenterBefore.y) > 0.001f ||
+        std::fabs(frontView->center.z - frontCenterBefore.z) > 0.001f) return 50;
+
+    Projected frontOriginBefore = originProjection(ViewKind::Front);
+    app.beginCameraDrag(100, 100, ViewKind::Front, true);
+    app.updateCameraDrag(100, 80);
+    app.finishDrag();
+    Projected frontOriginAfter = originProjection(ViewKind::Front);
+    if (!frontOriginBefore.ok || !frontOriginAfter.ok) return 60;
+    if (std::abs(frontOriginAfter.y - frontOriginBefore.y) <= 1) return 61;
+
+    Projected sideOriginBefore = originProjection(ViewKind::Side);
+    Vec3 sideCenterBefore = sideView->center;
+    app.beginCameraDrag(100, 100, ViewKind::Side, true);
+    app.updateCameraDrag(118, 80);
+    app.finishDrag();
+    Projected sideOriginAfter = originProjection(ViewKind::Side);
+    if (!sideOriginBefore.ok || !sideOriginAfter.ok) return 62;
+    if (std::abs(sideOriginAfter.x - sideOriginBefore.x) <= 1 ||
+        std::abs(sideOriginAfter.y - sideOriginBefore.y) <= 1) return 63;
+    if (std::fabs(sideView->center.x - sideCenterBefore.x) > 0.001f) return 64;
+
+    app.frameAll();
+    Projected topOriginAfterFrame = originProjection(ViewKind::Top);
+    if (!topOriginAfterFrame.ok) return 65;
+
+    Vec3 perspectiveCenterBefore = perspectiveView->center;
+    float perspectiveYawBefore = perspectiveView->yaw;
+    app.beginCameraDrag(100, 100, ViewKind::Perspective, true);
+    app.updateCameraDrag(130, 80);
+    app.finishDrag();
+    if (length(perspectiveView->center - perspectiveCenterBefore) <= 0.001f) return 51;
+    if (std::fabs(perspectiveView->yaw - perspectiveYawBefore) > 0.001f) return 52;
+    perspectiveCenterBefore = perspectiveView->center;
+    perspectiveYawBefore = perspectiveView->yaw;
+    app.beginCameraDrag(100, 100, ViewKind::Perspective, false);
+    app.updateCameraDrag(130, 80);
+    app.finishDrag();
+    if (std::fabs(perspectiveView->yaw - perspectiveYawBefore) <= 0.001f) return 53;
+    if (length(perspectiveView->center - perspectiveCenterBefore) > 0.001f) return 54;
 
     FrameBuffer textFb;
     textFb.clear(BLACK);

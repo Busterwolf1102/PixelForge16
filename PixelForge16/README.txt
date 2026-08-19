@@ -31,12 +31,13 @@ docs\tutorial_ko.md
 ## Mouse Controls
 
 ```text
-LMB                 Select / drag vertex
+LMB                 Select / drag vertex, or drag selected object
+Alt+LMB             Select object under cursor
 Shift+LMB           Add to selection
 Ctrl+LMB            Toggle selection
 Empty LMB drag      Box select vertices
-MMB                 Orbit perspective view
-Shift+MMB           Pan view
+MMB                 Orbit perspective view; pan TOP/FRONT/SIDE
+Shift+MMB           Pan any viewport
 Wheel               Zoom
 Palette click       Paint hovered/selected face
 Right click         Pixel context menu
@@ -47,6 +48,7 @@ Right click         Pixel context menu
 ```text
 SPACE               Maximize hovered/active viewport, or return to 4 views
 Home                Frame all
+F                   Frame selection unless creating a face from 3+ vertices
 Ctrl+Home           Reset views
 ```
 
@@ -62,6 +64,7 @@ S                   Scale selection/object
 M                   Merge selected vertices, or cycle render mode
 X / Delete          Delete selection
 D                   Duplicate object/selection
+Selected object drag Move object transform without changing local vertices
 Arrow/WASD          Nudge selected vertices
 PageUp/PageDown     Nudge selected vertices on world Z
 Z                   Z-axis move mode: drag, or type a value and press Enter
