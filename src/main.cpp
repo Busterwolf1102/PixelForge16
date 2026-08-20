@@ -1014,6 +1014,7 @@ public:
     int offsetY = 0;
     int mouseX = 0;
     int mouseY = 0;
+    bool mouseCaptured = false;
 
     App() {
         loadSettings();
@@ -1269,6 +1270,18 @@ public:
 
     void clearSelection() {
         selection.clear();
+    }
+
+    void captureMouse() {
+        if (!hwnd) return;
+        SetCapture(hwnd);
+        mouseCaptured = true;
+    }
+
+    void releaseMouseCapture() {
+        if (!mouseCaptured) return;
+        mouseCaptured = false;
+        if (hwnd && GetCapture() == hwnd) ReleaseCapture();
     }
 
     bool isSelected(ElementType type, uint32_t objectId, uint32_t id) const {
@@ -1715,10 +1728,6 @@ public:
             drawPerspectiveAxes(vd);
             return;
         }
-        if (!scene.grid) {
-            drawOriginMarker(vd);
-            return;
-        }
         float grid = std::max(0.001f, scene.gridSize);
         float step = grid * view.zoom;
 
@@ -1752,37 +1761,36 @@ public:
             return kTheme.gridMinor;
         };
 
-        if (step >= 3.0f) {
+        auto isOriginCoord = [&](float coord) {
+            return std::fabs(coord) < grid * 0.001f;
+        };
+        auto drawWorldLine = [&](Vec3 p0, Vec3 p1, uint8_t color) {
+            Projected s0 = projectPoint(vd, p0);
+            Projected s1 = projectPoint(vd, p1);
+            if (!s0.ok || !s1.ok) return;
+            fb.line(s0.x, s0.y, s1.x, s1.y, color, &vd.rect);
+        };
+        auto drawWorldAxes = [&]() {
+            drawWorldLine(axisV * vMin, axisV * vMax, colorV);
+            drawWorldLine(axisH * hMin, axisH * hMax, colorH);
+        };
+
+        if (scene.grid && step >= 3.0f) {
             for (float h = hMin; h <= hMax + grid * 0.5f; h += grid) {
+                if (isOriginCoord(h)) continue;
                 Vec3 p0 = axisH * h + axisV * vMin;
                 Vec3 p1 = axisH * h + axisV * vMax;
-                Projected s0 = projectPoint(vd, p0);
-                Projected s1 = projectPoint(vd, p1);
-                uint8_t col = std::fabs(h) < 0.001f ? colorV : gridColor(h);
-                fb.line(s0.x, s0.y, s1.x, s1.y, col, &vd.rect);
+                drawWorldLine(p0, p1, gridColor(h));
             }
             for (float vCoord = vMin; vCoord <= vMax + grid * 0.5f; vCoord += grid) {
+                if (isOriginCoord(vCoord)) continue;
                 Vec3 p0 = axisH * hMin + axisV * vCoord;
                 Vec3 p1 = axisH * hMax + axisV * vCoord;
-                Projected s0 = projectPoint(vd, p0);
-                Projected s1 = projectPoint(vd, p1);
-                uint8_t col = std::fabs(vCoord) < 0.001f ? colorH : gridColor(vCoord);
-                fb.line(s0.x, s0.y, s1.x, s1.y, col, &vd.rect);
+                drawWorldLine(p0, p1, gridColor(vCoord));
             }
-        } else {
-            Vec3 axisV0 = axisV * vMin;
-            Vec3 axisV1 = axisV * vMax;
-            Projected sv0 = projectPoint(vd, axisV0);
-            Projected sv1 = projectPoint(vd, axisV1);
-            fb.line(sv0.x, sv0.y, sv1.x, sv1.y, colorV, &vd.rect);
-
-            Vec3 axisH0 = axisH * hMin;
-            Vec3 axisH1 = axisH * hMax;
-            Projected sh0 = projectPoint(vd, axisH0);
-            Projected sh1 = projectPoint(vd, axisH1);
-            fb.line(sh0.x, sh0.y, sh1.x, sh1.y, colorH, &vd.rect);
         }
 
+        drawWorldAxes();
         drawOriginMarker(vd);
     }
 
@@ -2205,6 +2213,20 @@ public:
         return result;
     }
 
+    void refreshHoverUnderMouse() {
+        hover = pick(mouseX, mouseY);
+        if (hover.type != ElementType::None) {
+            activeView = hover.view;
+            return;
+        }
+        auto vd = viewportAt(mouseX, mouseY);
+        if (vd) activeView = vd->state->kind;
+    }
+
+    bool hoverOnSelectedObject() const {
+        return hover.objectId != 0 && isObjectSelected(hover.objectId);
+    }
+
     ElementRef refFromHover(const HoverInfo &h) const {
         if (h.type == ElementType::Vertex) return {ElementType::Vertex, h.objectId, h.id};
         if (h.type == ElementType::Face) return {ElementType::Face, h.objectId, h.id};
@@ -2250,6 +2272,7 @@ public:
             Vertex *v = findVertex(*obj, r.id);
             if (v) drag.vertices.push_back({r.objectId, r.id, v->position});
         }
+        captureMouse();
         status = "MOVE VERTEX";
     }
 
@@ -2309,7 +2332,7 @@ public:
             status = "SELECT VERTICES";
             return;
         }
-        if (hwnd) SetCapture(hwnd);
+        captureMouse();
         status = "MOVE Z | DRAG OR TYPE VALUE | ENTER APPLY | ESC CANCEL";
     }
 
@@ -2372,8 +2395,9 @@ public:
         } else {
             status = "MOVE CANCEL";
         }
-        if (hwnd) ReleaseCapture();
+        releaseMouseCapture();
         drag = DragState {};
+        refreshHoverUnderMouse();
     }
 
     bool isObjectSelected(uint32_t objectId) const {
@@ -2414,6 +2438,7 @@ public:
             status = "NOTHING SELECTED";
             return;
         }
+        captureMouse();
         status = "MOVE OBJECT";
     }
 
@@ -2461,6 +2486,7 @@ public:
         drag.startX = drag.lastX = x;
         drag.startY = drag.lastY = y;
         drag.before = makeSnapshot();
+        captureMouse();
         status = "BOX SELECT";
     }
 
@@ -2491,6 +2517,7 @@ public:
         drag.view = view;
         drag.startX = drag.lastX = x;
         drag.startY = drag.lastY = y;
+        captureMouse();
         status = pan ? "PAN VIEW" : "ORBIT VIEW";
     }
 
@@ -2531,17 +2558,20 @@ public:
             // Selection-only changes are intentionally not undo history entries.
         }
         drag = DragState {};
+        releaseMouseCapture();
+        refreshHoverUnderMouse();
     }
 
     void cancelDrag() {
         if (drag.mode == DragMode::VertexDrag || drag.mode == DragMode::VertexZMove || drag.mode == DragMode::ObjectDrag) {
             restoreSnapshot(drag.before);
             status = "MOVE CANCEL";
-            if (hwnd) ReleaseCapture();
         } else {
             status = "CANCEL";
         }
+        releaseMouseCapture();
         drag = DragState {};
+        refreshHoverUnderMouse();
     }
 
     void applyColorToSelection(uint8_t color) {
@@ -3537,14 +3567,13 @@ public:
     }
 
     void onLeftDown(int x, int y) {
-        SetCapture(hwnd);
         mouseX = x;
         mouseY = y;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
         if (drag.mode == DragMode::VertexZMove) {
-            SetCapture(hwnd);
+            captureMouse();
             updateVertexZMove(x, y, ctrl);
             return;
         }
@@ -3567,10 +3596,10 @@ public:
         if (alt && hover.objectId != 0) {
             selectObjectFromHover(shift, ctrl);
             if (isObjectSelected(hover.objectId)) beginObjectDrag(x, y, vd->state->kind);
+        } else if (hoverOnSelectedObject() && !shift && !ctrl) {
+            beginObjectDrag(x, y, vd->state->kind);
         } else if (hover.type == ElementType::Vertex) {
             beginVertexDrag(x, y, vd->state->kind, shift, ctrl);
-        } else if (hover.objectId != 0 && isObjectSelected(hover.objectId) && !shift && !ctrl) {
-            beginObjectDrag(x, y, vd->state->kind);
         } else if (hover.type == ElementType::Face) {
             selectFromHover(shift, ctrl);
         } else {
@@ -3579,7 +3608,8 @@ public:
     }
 
     void onLeftUp(int x, int y) {
-        ReleaseCapture();
+        mouseX = x;
+        mouseY = y;
         if (drag.mode == DragMode::BoxSelect) {
             bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -3592,6 +3622,8 @@ public:
                 finishBoxSelect(shift, ctrl);
             }
             drag = DragState {};
+            releaseMouseCapture();
+            refreshHoverUnderMouse();
             return;
         }
         if (drag.mode != DragMode::None) {
@@ -3602,11 +3634,21 @@ public:
     void onMiddleDown(int x, int y) {
         auto vd = viewportAt(x, y);
         if (!vd) return;
-        SetCapture(hwnd);
         activeView = vd->state->kind;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool pan = shift || vd->state->kind != ViewKind::Perspective;
         beginCameraDrag(x, y, vd->state->kind, pan);
+    }
+
+    void onCaptureChanged(HWND newCapture) {
+        if (!mouseCaptured || newCapture == hwnd) return;
+        mouseCaptured = false;
+        if (drag.mode != DragMode::None) cancelDrag();
+    }
+
+    void onFocusLost() {
+        if (drag.mode != DragMode::None) cancelDrag();
+        else releaseMouseCapture();
     }
 
     void onMouseWheel(int x, int y, int delta) {
@@ -3869,6 +3911,27 @@ static int runSelfTest() {
         ViewportDraw vd = viewportFor(kind);
         return app.projectPoint(vd, {0, 0, 0});
     };
+    app.clearSelection();
+    app.addSelection({ElementType::Object, moveObjectId, moveObjectId});
+    Object3D *repeatedObj = findObject(app.scene, moveObjectId);
+    if (!repeatedObj) return 71;
+    float repeatedStartX = repeatedObj->transform.position.x;
+    for (int i = 0; i < 20; ++i) {
+        repeatedObj = findObject(app.scene, moveObjectId);
+        if (!repeatedObj) return 72;
+        ViewportDraw dragVd = viewportFor(ViewKind::Top);
+        Projected hit = app.projectPoint(dragVd, repeatedObj->transform.position);
+        if (!hit.ok) return 73;
+        app.onLeftDown(hit.x, hit.y);
+        if (app.drag.mode != DragMode::ObjectDrag) return 74;
+        app.onMouseMove(hit.x + 18, hit.y, 0);
+        app.onLeftUp(hit.x + 18, hit.y);
+        if (app.drag.mode != DragMode::None) return 75;
+        if (!app.isObjectSelected(moveObjectId)) return 76;
+    }
+    repeatedObj = findObject(app.scene, moveObjectId);
+    if (!repeatedObj) return 77;
+    if (std::fabs(repeatedObj->transform.position.x - (repeatedStartX + 20.0f)) > 0.01f) return 78;
     ViewportDraw topVdBefore = viewportFor(ViewKind::Top);
     Projected topOriginBefore = app.projectPoint(topVdBefore, {0, 0, 0});
     if (!topOriginBefore.ok) return 55;
@@ -3887,6 +3950,7 @@ static int runSelfTest() {
         std::abs(topOriginAfter.y - (topVdAfter.rect.y + topVdAfter.rect.h / 2)) <= 1) return 58;
     if (std::abs(topOriginAfter.x - topOriginBefore.x) <= 1 &&
         std::abs(topOriginAfter.y - topOriginBefore.y) <= 1) return 59;
+    if (topOriginAfter.x <= topOriginBefore.x || topOriginAfter.y >= topOriginBefore.y) return 66;
     if (std::fabs(firstMulti->transform.position.x - objectPosBeforePan.x) > 0.001f) return 48;
     if (std::fabs(topView->center.x - topCenterBefore.x) <= 0.001f && std::fabs(topView->center.z - topCenterBefore.z) <= 0.001f) return 49;
     if (std::fabs(frontView->center.x - frontCenterBefore.x) > 0.001f ||
@@ -3900,6 +3964,7 @@ static int runSelfTest() {
     Projected frontOriginAfter = originProjection(ViewKind::Front);
     if (!frontOriginBefore.ok || !frontOriginAfter.ok) return 60;
     if (std::abs(frontOriginAfter.y - frontOriginBefore.y) <= 1) return 61;
+    if (frontOriginAfter.y >= frontOriginBefore.y) return 67;
 
     Projected sideOriginBefore = originProjection(ViewKind::Side);
     Vec3 sideCenterBefore = sideView->center;
@@ -3910,6 +3975,7 @@ static int runSelfTest() {
     if (!sideOriginBefore.ok || !sideOriginAfter.ok) return 62;
     if (std::abs(sideOriginAfter.x - sideOriginBefore.x) <= 1 ||
         std::abs(sideOriginAfter.y - sideOriginBefore.y) <= 1) return 63;
+    if (sideOriginAfter.x <= sideOriginBefore.x || sideOriginAfter.y >= sideOriginBefore.y) return 68;
     if (std::fabs(sideView->center.x - sideCenterBefore.x) > 0.001f) return 64;
 
     app.frameAll();
@@ -3917,12 +3983,19 @@ static int runSelfTest() {
     if (!topOriginAfterFrame.ok) return 65;
 
     Vec3 perspectiveCenterBefore = perspectiveView->center;
+    Projected perspectiveOriginBeforePan = originProjection(ViewKind::Perspective);
     float perspectiveYawBefore = perspectiveView->yaw;
     app.beginCameraDrag(100, 100, ViewKind::Perspective, true);
     app.updateCameraDrag(130, 80);
     app.finishDrag();
+    Projected perspectiveOriginAfterPan = originProjection(ViewKind::Perspective);
     if (length(perspectiveView->center - perspectiveCenterBefore) <= 0.001f) return 51;
     if (std::fabs(perspectiveView->yaw - perspectiveYawBefore) > 0.001f) return 52;
+    if (!perspectiveOriginBeforePan.ok || !perspectiveOriginAfterPan.ok) return 69;
+    if (std::abs(perspectiveOriginAfterPan.x - perspectiveOriginBeforePan.x) <= 1 &&
+        std::abs(perspectiveOriginAfterPan.y - perspectiveOriginBeforePan.y) <= 1) return 70;
+    if (perspectiveOriginAfterPan.x <= perspectiveOriginBeforePan.x ||
+        perspectiveOriginAfterPan.y >= perspectiveOriginBeforePan.y) return 79;
     perspectiveCenterBefore = perspectiveView->center;
     perspectiveYawBefore = perspectiveView->yaw;
     app.beginCameraDrag(100, 100, ViewKind::Perspective, false);
@@ -4000,8 +4073,13 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         return 0;
     }
     case WM_MBUTTONUP:
-        ReleaseCapture();
         g_app.finishDrag();
+        return 0;
+    case WM_CAPTURECHANGED:
+        g_app.onCaptureChanged(reinterpret_cast<HWND>(lParam));
+        return 0;
+    case WM_KILLFOCUS:
+        g_app.onFocusLost();
         return 0;
     case WM_RBUTTONDOWN: {
         auto [x, y] = g_app.screenToLogical(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
