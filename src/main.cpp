@@ -842,6 +842,7 @@ struct HoverInfo {
 struct Snapshot {
     Scene scene;
     std::vector<ElementRef> selection;
+    uint32_t activeObjectId = 0;
     std::filesystem::path currentFile;
 };
 
@@ -942,6 +943,13 @@ static Object3D *findObject(Scene &scene, uint32_t id) {
     return nullptr;
 }
 
+static const Object3D *findObject(const Scene &scene, uint32_t id) {
+    for (const auto &obj : scene.objects) {
+        if (obj.id == id) return &obj;
+    }
+    return nullptr;
+}
+
 static Vec3 faceCenterLocal(const Object3D &obj, const Face &face) {
     Vec3 c {0, 0, 0};
     int n = 0;
@@ -995,6 +1003,7 @@ public:
     FrameBuffer fb;
     Scene scene;
     std::vector<ElementRef> selection;
+    uint32_t activeObjectId = 0;
     HoverInfo hover;
     std::array<ViewState, 4> views;
     std::optional<ViewKind> maximizedView;
@@ -1229,13 +1238,15 @@ public:
     uint32_t allocId() { return scene.nextId++; }
 
     Snapshot makeSnapshot() const {
-        return {scene, selection, currentFile};
+        return {scene, selection, activeObjectId, currentFile};
     }
 
     void restoreSnapshot(const Snapshot &s) {
         scene = s.scene;
         selection = s.selection;
+        activeObjectId = s.activeObjectId;
         currentFile = s.currentFile;
+        sanitizeActiveObject();
     }
 
     void pushUndo(const Snapshot &before) {
@@ -1272,6 +1283,25 @@ public:
         selection.clear();
     }
 
+    bool objectExists(uint32_t objectId) const {
+        return findObject(scene, objectId) != nullptr;
+    }
+
+    void setActiveObject(uint32_t objectId) {
+        activeObjectId = objectExists(objectId) ? objectId : 0;
+    }
+
+    void sanitizeActiveObject() {
+        if (activeObjectId != 0 && objectExists(activeObjectId)) return;
+        activeObjectId = 0;
+        for (const ElementRef &r : selection) {
+            if (objectExists(r.objectId)) {
+                activeObjectId = r.objectId;
+                return;
+            }
+        }
+    }
+
     void captureMouse() {
         if (!hwnd) return;
         SetCapture(hwnd);
@@ -1291,15 +1321,18 @@ public:
 
     void addSelection(ElementRef r) {
         if (r.type == ElementType::None) return;
+        setActiveObject(r.objectId);
         if (!isSelected(r.type, r.objectId, r.id)) selection.push_back(r);
     }
 
     void toggleSelection(ElementRef r) {
         auto it = std::find_if(selection.begin(), selection.end(), [&](const ElementRef &s) { return sameRef(s, r); });
         if (it == selection.end()) {
+            setActiveObject(r.objectId);
             selection.push_back(r);
         } else {
             selection.erase(it);
+            sanitizeActiveObject();
         }
     }
 
@@ -1331,6 +1364,7 @@ public:
         Snapshot before = makeSnapshot();
         scene = Scene {};
         selection.clear();
+        activeObjectId = 0;
         currentFile.clear();
         addCube(false);
         resetViews();
@@ -2223,10 +2257,6 @@ public:
         if (vd) activeView = vd->state->kind;
     }
 
-    bool hoverOnSelectedObject() const {
-        return hover.objectId != 0 && isObjectSelected(hover.objectId);
-    }
-
     ElementRef refFromHover(const HoverInfo &h) const {
         if (h.type == ElementType::Vertex) return {ElementType::Vertex, h.objectId, h.id};
         if (h.type == ElementType::Face) return {ElementType::Face, h.objectId, h.id};
@@ -2237,7 +2267,10 @@ public:
     void selectFromHover(bool shift, bool ctrl) {
         ElementRef r = refFromHover(hover);
         if (r.type == ElementType::None) {
-            if (!shift && !ctrl) clearSelection();
+            if (!shift && !ctrl) {
+                clearSelection();
+                activeObjectId = 0;
+            }
             return;
         }
         if (ctrl) {
@@ -2404,6 +2437,20 @@ public:
         return isSelected(ElementType::Object, objectId, objectId);
     }
 
+    bool hoverOnDraggableObject() const {
+        if (hover.objectId == 0) return false;
+        return isObjectSelected(hover.objectId) || hover.objectId == activeObjectId;
+    }
+
+    std::vector<ElementRef> objectDragTargets() const {
+        std::vector<ElementRef> objects = selectedObjects();
+        if (!objects.empty()) return objects;
+        if (hover.objectId != 0 && hover.objectId == activeObjectId && objectExists(hover.objectId)) {
+            return {{ElementType::Object, hover.objectId, hover.objectId}};
+        }
+        return {};
+    }
+
     void selectObjectFromHover(bool shift, bool ctrl) {
         if (hover.objectId == 0) return;
         ElementRef r {ElementType::Object, hover.objectId, hover.objectId};
@@ -2418,7 +2465,7 @@ public:
     }
 
     void beginObjectDrag(int x, int y, ViewKind view) {
-        std::vector<ElementRef> objects = selectedObjects();
+        std::vector<ElementRef> objects = objectDragTargets();
         if (objects.empty()) {
             status = "NOTHING SELECTED";
             return;
@@ -2740,6 +2787,8 @@ public:
             }
         }
         clearSelection();
+        sanitizeActiveObject();
+        refreshHoverUnderMouse();
         pushUndo(before);
         status = "DELETE";
     }
@@ -3223,6 +3272,7 @@ public:
         Snapshot before = makeSnapshot();
         scene = loaded;
         selection.clear();
+        activeObjectId = 0;
         currentFile = path;
         pushUndo(before);
         frameAll();
@@ -3596,10 +3646,17 @@ public:
         if (alt && hover.objectId != 0) {
             selectObjectFromHover(shift, ctrl);
             if (isObjectSelected(hover.objectId)) beginObjectDrag(x, y, vd->state->kind);
-        } else if (hoverOnSelectedObject() && !shift && !ctrl) {
-            beginObjectDrag(x, y, vd->state->kind);
         } else if (hover.type == ElementType::Vertex) {
-            beginVertexDrag(x, y, vd->state->kind, shift, ctrl);
+            ElementRef hit {ElementType::Vertex, hover.objectId, hover.id};
+            if (isSelected(hit.type, hit.objectId, hit.id)) {
+                beginVertexDrag(x, y, vd->state->kind, shift, ctrl);
+            } else if (hoverOnDraggableObject() && !shift && !ctrl) {
+                beginObjectDrag(x, y, vd->state->kind);
+            } else {
+                beginVertexDrag(x, y, vd->state->kind, shift, ctrl);
+            }
+        } else if (hoverOnDraggableObject() && !shift && !ctrl) {
+            beginObjectDrag(x, y, vd->state->kind);
         } else if (hover.type == ElementType::Face) {
             selectFromHover(shift, ctrl);
         } else {
@@ -3617,6 +3674,7 @@ public:
             drag.lastY = y;
             if (std::abs(drag.startX - drag.lastX) < 3 && std::abs(drag.startY - drag.lastY) < 3) {
                 clearSelection();
+                activeObjectId = 0;
                 status = "SELECT EMPTY";
             } else {
                 finishBoxSelect(shift, ctrl);
@@ -3911,27 +3969,132 @@ static int runSelfTest() {
         ViewportDraw vd = viewportFor(kind);
         return app.projectPoint(vd, {0, 0, 0});
     };
+    auto dragObjectByInput = [&](uint32_t objectId, ViewKind kind, int dx, int dy, int code) -> int {
+        Object3D *target = findObject(app.scene, objectId);
+        if (!target) return code;
+        ViewState *state = app.stateFor(kind);
+        state->center = target->transform.position;
+        ViewportDraw dragVd = viewportFor(kind);
+        Projected hit = app.projectPoint(dragVd, target->transform.position);
+        if (!hit.ok || !dragVd.rect.contains(hit.x, hit.y)) return code + 1;
+        app.onLeftDown(hit.x, hit.y);
+        if (app.drag.mode != DragMode::ObjectDrag) return code + 2;
+        app.onMouseMove(hit.x + dx, hit.y + dy, 0);
+        app.onLeftUp(hit.x + dx, hit.y + dy);
+        if (app.drag.mode != DragMode::None) return code + 3;
+        return 0;
+    };
     app.clearSelection();
     app.addSelection({ElementType::Object, moveObjectId, moveObjectId});
     Object3D *repeatedObj = findObject(app.scene, moveObjectId);
     if (!repeatedObj) return 71;
     float repeatedStartX = repeatedObj->transform.position.x;
-    for (int i = 0; i < 20; ++i) {
+    float repeatedStep = 18.0f / std::max(1.0f, app.stateFor(ViewKind::Top)->zoom);
+    for (int i = 0; i < 50; ++i) {
         repeatedObj = findObject(app.scene, moveObjectId);
         if (!repeatedObj) return 72;
-        ViewportDraw dragVd = viewportFor(ViewKind::Top);
-        Projected hit = app.projectPoint(dragVd, repeatedObj->transform.position);
-        if (!hit.ok) return 73;
-        app.onLeftDown(hit.x, hit.y);
-        if (app.drag.mode != DragMode::ObjectDrag) return 74;
-        app.onMouseMove(hit.x + 18, hit.y, 0);
-        app.onLeftUp(hit.x + 18, hit.y);
-        if (app.drag.mode != DragMode::None) return 75;
+        int dragResult = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 73);
+        if (dragResult != 0) return dragResult;
         if (!app.isObjectSelected(moveObjectId)) return 76;
     }
     repeatedObj = findObject(app.scene, moveObjectId);
     if (!repeatedObj) return 77;
-    if (std::fabs(repeatedObj->transform.position.x - (repeatedStartX + 20.0f)) > 0.01f) return 78;
+    if (std::fabs(repeatedObj->transform.position.x - (repeatedStartX + repeatedStep * 50.0f)) > 0.01f) return 78;
+
+    repeatedObj = findObject(app.scene, moveObjectId);
+    if (!repeatedObj || repeatedObj->mesh.vertices.empty()) return 80;
+    uint32_t vertexMoveId = repeatedObj->mesh.vertices.front().id;
+    app.clearSelection();
+    app.addSelection({ElementType::Vertex, moveObjectId, vertexMoveId});
+    app.stateFor(ViewKind::Top)->center = repeatedObj->transform.position;
+    ViewportDraw vertexVd = viewportFor(ViewKind::Top);
+    Projected vertexHit = app.projectPoint(vertexVd, transformPoint(repeatedObj->mesh.vertices.front().position, repeatedObj->transform));
+    if (!vertexHit.ok) return 81;
+    app.onLeftDown(vertexHit.x, vertexHit.y);
+    if (app.drag.mode != DragMode::VertexDrag) return 82;
+    app.onMouseMove(vertexHit.x + 18, vertexHit.y, 0);
+    app.onLeftUp(vertexHit.x + 18, vertexHit.y);
+    if (app.drag.mode != DragMode::None) return 83;
+    Vec3 afterVertexObjectPos = findObject(app.scene, moveObjectId)->transform.position;
+    int vertexThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 84);
+    if (vertexThenDrag != 0) return vertexThenDrag;
+    if (findObject(app.scene, moveObjectId)->transform.position.x <= afterVertexObjectPos.x) return 88;
+
+    Object3D *editObj = findObject(app.scene, moveObjectId);
+    if (!editObj || editObj->mesh.faces.empty()) return 89;
+    app.clearSelection();
+    app.addSelection({ElementType::Face, moveObjectId, editObj->mesh.faces.front().id});
+    app.extrude();
+    int extrudeThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 90);
+    if (extrudeThenDrag != 0) return extrudeThenDrag;
+
+    app.inset();
+    int insetThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 95);
+    if (insetThenDrag != 0) return insetThenDrag;
+
+    editObj = findObject(app.scene, moveObjectId);
+    if (!editObj || editObj->mesh.faces.empty()) return 99;
+    app.clearSelection();
+    app.addSelection({ElementType::Face, moveObjectId, editObj->mesh.faces.front().id});
+    app.applyColorToSelection(LIGHT_RED);
+    int colorThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 100);
+    if (colorThenDrag != 0) return colorThenDrag;
+
+    Vec3 beforeUndoDrag = findObject(app.scene, moveObjectId)->transform.position;
+    int undoSetupDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 104);
+    if (undoSetupDrag != 0) return undoSetupDrag;
+    app.undo();
+    if (std::fabs(findObject(app.scene, moveObjectId)->transform.position.x - beforeUndoDrag.x) > 0.01f) return 108;
+    int undoThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 109);
+    if (undoThenDrag != 0) return undoThenDrag;
+
+    std::filesystem::path dragTestDir = ensureDir(executableDir() / "selftest");
+    if (!app.savePf16(dragTestDir / "drag_cycle_scene.pf16")) return 113;
+    int saveThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 114);
+    if (saveThenDrag != 0) return saveThenDrag;
+
+    editObj = findObject(app.scene, moveObjectId);
+    if (!editObj || editObj->mesh.vertices.size() < 2) return 118;
+    app.clearSelection();
+    app.addSelection({ElementType::Vertex, moveObjectId, editObj->mesh.vertices[0].id});
+    app.addSelection({ElementType::Vertex, moveObjectId, editObj->mesh.vertices[1].id});
+    app.scaleSelection(1.1f);
+    int scaleThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 119);
+    if (scaleThenDrag != 0) return scaleThenDrag;
+
+    editObj = findObject(app.scene, moveObjectId);
+    if (!editObj || editObj->mesh.vertices.size() < 2) return 123;
+    app.clearSelection();
+    app.addSelection({ElementType::Vertex, moveObjectId, editObj->mesh.vertices[0].id});
+    app.addSelection({ElementType::Vertex, moveObjectId, editObj->mesh.vertices[1].id});
+    app.mergeSelectedVertices();
+    int mergeThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 124);
+    if (mergeThenDrag != 0) return mergeThenDrag;
+
+    editObj = findObject(app.scene, moveObjectId);
+    if (!editObj || editObj->mesh.faces.empty()) return 128;
+    app.clearSelection();
+    app.addSelection({ElementType::Face, moveObjectId, editObj->mesh.faces.front().id});
+    app.deleteSelection();
+    int deleteThenDrag = dragObjectByInput(moveObjectId, ViewKind::Top, 18, 0, 129);
+    if (deleteThenDrag != 0) return deleteThenDrag;
+
+    std::array<uint32_t, 4> alternatingObjects {{moveObjectId, secondObjectId, moveObjectId, secondObjectId}};
+    for (size_t i = 0; i < alternatingObjects.size(); ++i) {
+        app.clearSelection();
+        app.addSelection({ElementType::Object, alternatingObjects[i], alternatingObjects[i]});
+        int alternateDrag = dragObjectByInput(alternatingObjects[i], i % 2 == 0 ? ViewKind::Front : ViewKind::Side, 18, 0, int(133 + i * 4));
+        if (alternateDrag != 0) return alternateDrag;
+    }
+
+    firstMulti = findObject(app.scene, moveObjectId);
+    secondMulti = findObject(app.scene, secondObjectId);
+    if (!firstMulti || !secondMulti) return 149;
+
+    topView->center = {0, 0, 0};
+    frontView->center = {0, 0, 0};
+    sideView->center = {0, 0, 0};
+    perspectiveView->center = {0, 0, 0};
     ViewportDraw topVdBefore = viewportFor(ViewKind::Top);
     Projected topOriginBefore = app.projectPoint(topVdBefore, {0, 0, 0});
     if (!topOriginBefore.ok) return 55;
